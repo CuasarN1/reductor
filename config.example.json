@@ -55,6 +55,7 @@
         "auto_build": true,
         "mount_host_cache": false,
         "mounts": ["/home/you/projects"],
+        "published_ports": [],
         "extras": ["ffmpeg", "pandoc", "matplotlib", "pandas"]
     },
     "heartbeat": {

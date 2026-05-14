@@ -90,6 +90,27 @@ def _build_user_mount_flags(mounts: list[str]) -> list[str]:
     return flags
 
 
+def _build_published_port_flags(ports: list[str]) -> list[str]:
+    """Return ``-p`` flags for user-configured container port publications.
+
+    Each entry is passed verbatim to ``docker run -p`` so the full docker
+    syntax is supported (``host_port:container_port``,
+    ``host_ip:host_port:container_port``, ``host_port:container_port/udp``).
+    Empty or non-string entries are skipped; docker validates the rest.
+    """
+    flags: list[str] = []
+    for entry in ports:
+        if not isinstance(entry, str):
+            logger.warning("Ignoring non-string published_ports entry: %r", entry)
+            continue
+        spec = entry.strip()
+        if not spec:
+            continue
+        flags += ["-p", spec]
+        logger.info("Published port: %s", spec)
+    return flags
+
+
 class DockerManager:
     """Manages a persistent Docker sidecar for sandboxed CLI execution.
 
@@ -321,6 +342,10 @@ class DockerManager:
             # to the host's InternalAgentAPI (127.0.0.1:8799).
             "--add-host=host.docker.internal:host-gateway",
         ]
+
+        # User-defined published ports (e.g. exposing in-container web UIs to
+        # the host or LAN). Each entry is passed verbatim to ``docker run -p``.
+        cmd += _build_published_port_flags(self._config.published_ports)
 
         # Linux (incl. WSL) needs explicit UID/GID so files created inside the
         # container are owned by the host user, not root.
