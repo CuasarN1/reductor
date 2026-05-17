@@ -25,14 +25,20 @@ class TaskResult:
     execution: OneShotExecutionResult | None
 
 
+@dataclass(frozen=True, slots=True)
+class TaskRunOptions:
+    """Execution options shared by cron, webhook, and background one-shot runs."""
+
+    cwd: Path
+    timeout_seconds: float
+    timeout_label: str
+    ductor_home: Path | None = None
+
+
 async def run_oneshot_task(
     exec_config: TaskExecutionConfig,
     prompt: str,
-    *,
-    cwd: Path,
-    timeout_seconds: float,
-    timeout_label: str,
-    ductor_home: Path | None = None,
+    options: TaskRunOptions,
 ) -> TaskResult:
     """Build the CLI command and execute it, returning a normalized result.
 
@@ -50,14 +56,14 @@ async def run_oneshot_task(
             execution=None,
         )
 
-    extra_env = {"DUCTOR_HOME": str(ductor_home)} if ductor_home is not None else None
+    if options.ductor_home is not None:
+        one_shot.env_overrides["DUCTOR_HOME"] = str(options.ductor_home)
     execution = await execute_one_shot(
         one_shot,
-        cwd=cwd,
+        cwd=options.cwd,
         provider=exec_config.provider,
-        timeout_seconds=timeout_seconds,
-        timeout_label=timeout_label,
-        extra_env=extra_env,
+        timeout_seconds=options.timeout_seconds,
+        timeout_label=options.timeout_label,
     )
 
     return TaskResult(
@@ -122,10 +128,12 @@ async def execute_in_task_folder(  # noqa: PLR0913
         result = await run_oneshot_task(
             exec_config,
             enriched,
-            cwd=folder,
-            timeout_seconds=timeout_seconds,
-            timeout_label=task_label,
-            ductor_home=observer._paths.ductor_home,
+            TaskRunOptions(
+                cwd=folder,
+                timeout_seconds=timeout_seconds,
+                timeout_label=task_label,
+                ductor_home=observer._paths.ductor_home,
+            ),
         )
 
         if result.execution is not None:

@@ -27,6 +27,7 @@ class OneShotCommand:
 
     cmd: list[str] = field(default_factory=list)
     stdin_input: bytes | None = None
+    env_overrides: dict[str, str] = field(default_factory=dict)
 
 
 def build_cmd(exec_config: TaskExecutionConfig, prompt: str) -> OneShotCommand | None:
@@ -214,11 +215,10 @@ async def execute_one_shot(
     provider: str,
     timeout_seconds: float,
     timeout_label: str,
-    extra_env: dict[str, str] | None = None,
 ) -> OneShotExecutionResult:
     """Run one provider CLI command with timeout and normalized status/result."""
     stdin_input = one_shot.stdin_input
-    env = {**os.environ, **extra_env} if extra_env else None
+    env = {**os.environ, **one_shot.env_overrides} if one_shot.env_overrides else None
     proc = await asyncio.create_subprocess_exec(
         *one_shot.cmd,
         cwd=str(cwd),

@@ -8,6 +8,7 @@ import os
 import platform
 import sys
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 from shutil import which
 from typing import TYPE_CHECKING, ClassVar
@@ -90,7 +91,7 @@ def _build_user_mount_flags(mounts: list[str]) -> list[str]:
     return flags
 
 
-def _build_published_port_flags(ports: list[str]) -> list[str]:
+def _build_published_port_flags(ports: Sequence[object]) -> list[str]:
     """Return ``-p`` flags for user-configured container port publications.
 
     Each entry is passed verbatim to ``docker run -p`` so the full docker

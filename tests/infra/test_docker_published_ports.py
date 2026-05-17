@@ -36,7 +36,7 @@ class TestBuildPublishedPortFlags:
 
     def test_non_string_entries_are_skipped(self) -> None:
         # Defensive: malformed config (e.g. JSON ints) should not blow up.
-        flags = _build_published_port_flags(["8080:80", 1234, None])  # type: ignore[list-item]
+        flags = _build_published_port_flags(["8080:80", 1234, None])
         assert flags == ["-p", "8080:80"]
 
     def test_entries_are_stripped(self) -> None:

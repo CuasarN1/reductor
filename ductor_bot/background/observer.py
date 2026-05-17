@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from ductor_bot.background.models import BackgroundResult, BackgroundSubmit, BackgroundTask
 from ductor_bot.i18n import t
-from ductor_bot.infra.task_runner import run_oneshot_task
+from ductor_bot.infra.task_runner import TaskRunOptions, run_oneshot_task
 
 if TYPE_CHECKING:
     from ductor_bot.cli.param_resolver import TaskExecutionConfig
@@ -128,10 +128,12 @@ class BackgroundObserver:
             result = await run_oneshot_task(
                 exec_config,
                 bg_task.prompt,
-                cwd=self._paths.workspace,
-                timeout_seconds=self._timeout_seconds,
-                timeout_label="Background task",
-                ductor_home=self._paths.ductor_home,
+                TaskRunOptions(
+                    cwd=self._paths.workspace,
+                    timeout_seconds=self._timeout_seconds,
+                    timeout_label="Background task",
+                    ductor_home=self._paths.ductor_home,
+                ),
             )
 
             elapsed = time.monotonic() - t0

@@ -189,6 +189,29 @@ class TestExecuteOneShotStdin:
         assert call_kwargs["stdin"] == asyncio.subprocess.DEVNULL
         proc.communicate.assert_called_once_with(input=None)
 
+    async def test_env_overrides_are_merged_into_process_environment(self) -> None:
+        """Command-specific env overrides are passed without dropping host env."""
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+            proc = AsyncMock()
+            proc.communicate.return_value = (b'{"result":"ok"}', b"")
+            proc.returncode = 0
+            mock_exec.return_value = proc
+
+            await execute_one_shot(
+                OneShotCommand(
+                    cmd=["/usr/bin/claude", "-p", "--", "hello"],
+                    env_overrides={"DUCTOR_HOME": "/tmp/agent-home"},
+                ),
+                cwd=Path("/tmp"),
+                provider="claude",
+                timeout_seconds=60,
+                timeout_label="Test",
+            )
+
+        env = mock_exec.call_args[1]["env"]
+        assert env["DUCTOR_HOME"] == "/tmp/agent-home"
+        assert "PATH" in env
+
 
 class TestEnrichInstruction:
     def test_appends_memory_instructions(self) -> None:
