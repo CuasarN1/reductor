@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Claude Code, Codex CLI, and Gemini CLI as your coding assistant — on Telegram and Matrix.</strong><br>
-  Uses only official CLIs. Nothing spoofed, nothing proxied. Multi-transport, automation, and sub-agents in one runtime.
+  Uses only official CLIs. Nothing spoofed. Optional network proxy support is available. Multi-transport, automation, and sub-agents in one runtime.
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@
 
 If you want to control Claude Code, Google's Gemini CLI, or OpenAI's Codex CLI via Telegram or Matrix, build automations, or manage multiple agents easily — ductor is the right tool for you. The messaging layer is modular: Telegram and Matrix ship today, and new transports plug into the same transport-agnostic core.
 
-ductor runs on your machine and sends simple console commands as if you were typing them yourself, so you can use your active subscriptions (Claude Max, etc.) directly. No API proxying, no SDK patching, no spoofed headers. Just the official CLIs, executed as subprocesses, with all state kept in plain JSON and Markdown under `~/.ductor/`.
+ductor runs on your machine and sends simple console commands as if you were typing them yourself, so you can use your active subscriptions (Claude Max, etc.) directly. No SDK patching, no spoofed headers, no custom provider API shim. Just the official CLIs, executed as subprocesses, with all state kept in plain JSON and Markdown under `~/.ductor/`.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/PleasePrompto/ductor/main/docs/images/ductor-start.jpeg" alt="ductor /start screen" width="49%" />
@@ -49,6 +49,34 @@ The onboarding wizard handles CLI checks, transport setup (Telegram or Matrix), 
 For Matrix support: `ductor install matrix` — see [Matrix setup guide](docs/matrix-setup.md).
 
 Detailed setup: [`docs/installation.md`](docs/installation.md)
+
+## Proxy support
+
+ductor can work behind a network proxy for both Telegram Bot API traffic and
+provider CLI subprocesses.
+
+Telegram uses its own proxy setting:
+
+```bash
+export DUCTOR_TELEGRAM_PROXY_URL="http://127.0.0.1:8080"
+export DUCTOR_TELEGRAM_PROXY_SSL_VERIFY=false  # optional, only for trusted local proxies
+ductor
+```
+
+Provider CLIs (`claude`, `codex`, `gemini`) are launched as subprocesses and
+inherit the host environment, plus values from `~/.ductor/.env`. Configure the
+standard proxy variables the same way you would for the CLI in a terminal:
+
+```bash
+export HTTPS_PROXY="http://127.0.0.1:8080"
+export HTTP_PROXY="http://127.0.0.1:8080"
+export ALL_PROXY="socks5://127.0.0.1:10809"
+ductor
+```
+
+Actual LLM proxy behavior depends on the provider CLI honoring these standard
+environment variables. If Docker sandboxing is enabled, pass the proxy variables
+into the container as well.
 
 ## How chats work
 
@@ -207,6 +235,7 @@ Main chat:  "Ask codex-agent to write tests for the API"
 - **Task priorities** — `interactive`, `background`, and `batch` scheduling modes for background work
 - **Telegram status reactions** — stage-aware emoji tracker on the user message while the agent works
 - **Config hot-reload** — most settings update without restart (including language, scene, image)
+- **Proxy support** — Telegram Bot API proxy plus inherited proxy env for provider CLIs
 - **Docker sandbox** — optional sidecar container with configurable host mounts
 - **Service manager** — Linux (systemd), macOS (launchd), Windows (Task Scheduler)
 - **Cross-tool skill sync** — shared skills across `~/.claude/`, `~/.codex/`, `~/.gemini/`
