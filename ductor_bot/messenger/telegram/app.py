@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters import Command, CommandStart
@@ -183,8 +185,24 @@ class TelegramBot:
         self._orchestrator: Orchestrator | None = None
         self._abort_all_callback: Callable[[], Awaitable[int]] | None = None
 
+        telegram_proxy_url = os.getenv("DUCTOR_TELEGRAM_PROXY_URL", "").strip()
+        telegram_session = (
+            AiohttpSession(proxy=telegram_proxy_url) if telegram_proxy_url else None
+        )
+        telegram_proxy_ssl_verify = os.getenv(
+            "DUCTOR_TELEGRAM_PROXY_SSL_VERIFY", "true"
+        ).strip().lower()
+        if telegram_session is not None and telegram_proxy_ssl_verify in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }:
+            telegram_session._connector_init["ssl"] = False
+
         self._bot = Bot(
             token=config.telegram_token,
+            session=telegram_session,
             default=DefaultBotProperties(parse_mode=ParseMode.HTML),
         )
         self._notification_service: NotificationService = TelegramNotificationService(

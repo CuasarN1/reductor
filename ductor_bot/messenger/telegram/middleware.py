@@ -119,6 +119,18 @@ class AuthMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         if not user:
+            if isinstance(event, Message):
+                chat = event.chat
+                sender_chat = getattr(event, "sender_chat", None)
+                logger.info(
+                    "Auth rejected Telegram message without from_user chat_id=%s chat_type=%s "
+                    "sender_chat_id=%s sender_chat_type=%s text=%r",
+                    getattr(chat, "id", None),
+                    getattr(chat, "type", None),
+                    getattr(sender_chat, "id", None),
+                    getattr(sender_chat, "type", None),
+                    (event.text or event.caption or "")[:80],
+                )
             return None
 
         # Resolve chat: Message.chat directly, CallbackQuery via .message.chat.
@@ -133,12 +145,41 @@ class AuthMiddleware(BaseMiddleware):
         if chat_type in ("group", "supergroup"):
             group_id = chat.id if chat else None
             if group_id not in self._allowed_groups:
+                logger.info(
+                    "Auth rejected Telegram group message: group not allowed chat_id=%s "
+                    "chat_type=%s title=%r user_id=%s username=%r text=%r",
+                    group_id,
+                    chat_type,
+                    getattr(chat, "title", None),
+                    getattr(user, "id", None),
+                    getattr(user, "username", None),
+                    ((event.text if isinstance(event, Message) else None) or "")[:80],
+                )
                 if self._on_rejected and chat:
                     self._on_rejected(chat.id, chat_type, chat.title or "")
                 return None
             if user.id not in self._allowed_users:
+                sender_chat = getattr(event, "sender_chat", None) if isinstance(event, Message) else None
+                logger.info(
+                    "Auth rejected Telegram group message: user not allowed chat_id=%s "
+                    "chat_type=%s title=%r user_id=%s username=%r sender_chat_id=%s "
+                    "sender_chat_type=%s text=%r",
+                    group_id,
+                    chat_type,
+                    getattr(chat, "title", None),
+                    getattr(user, "id", None),
+                    getattr(user, "username", None),
+                    getattr(sender_chat, "id", None),
+                    getattr(sender_chat, "type", None),
+                    ((event.text if isinstance(event, Message) else None) or "")[:80],
+                )
                 return None
         elif user.id not in self._allowed_users:
+            logger.info(
+                "Auth rejected Telegram private/callback event: user not allowed user_id=%s username=%r",
+                getattr(user, "id", None),
+                getattr(user, "username", None),
+            )
             return None
 
         return await handler(event, data)
