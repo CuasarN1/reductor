@@ -19,12 +19,13 @@ from ductor_bot.multiagent.supervisor import (
 
 
 @pytest.fixture
-def main_config(tmp_path: Path) -> AgentConfig:
+def main_config(tmp_path: Path, unused_tcp_port: int) -> AgentConfig:
     """Create a main config with tmp_path as ductor_home."""
     return AgentConfig(
         ductor_home=str(tmp_path),
         telegram_token="main-token",
         allowed_user_ids=[1],
+        interagent_port=unused_tcp_port,
     )
 
 

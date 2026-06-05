@@ -409,6 +409,7 @@ class AgentConfig(BaseModel):
     cli_timeout: float = 1800.0
     reasoning_effort: str = "medium"
     file_access: str = "all"
+    showfiles_root: str = ""
     gemini_api_key: str | None = None
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)
     docker: DockerConfig = Field(default_factory=DockerConfig)

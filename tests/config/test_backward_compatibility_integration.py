@@ -34,6 +34,7 @@ def test_old_config_loads_with_new_defaults(tmp_path: Path) -> None:
 
     # Should have added cli_parameters
     assert changed is True
+    assert merged["showfiles_root"] == ""
     assert "cli_parameters" in merged
     assert merged["cli_parameters"]["claude"] == []
     assert merged["cli_parameters"]["codex"] == []

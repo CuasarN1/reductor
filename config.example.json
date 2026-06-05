@@ -18,6 +18,7 @@
     "cli_timeout": 600.0,
     "reasoning_effort": "medium",
     "file_access": "all",
+    "showfiles_root": "",
     "gemini_api_key": "null",
     "transport": "telegram",
     "transports": ["telegram"],

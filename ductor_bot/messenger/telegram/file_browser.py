@@ -1,6 +1,6 @@
-"""Interactive file browser for the ~/.ductor directory.
+"""Interactive file browser for a configured root directory.
 
-Renders the ductor home directory as a navigable inline-keyboard tree.
+Renders the configured root directory as a navigable inline-keyboard tree.
 Folders are clickable buttons that edit the message in-place; files are
 listed in the text body for reference.
 
@@ -36,14 +36,18 @@ def is_file_browser_callback(data: str) -> bool:
     return data.startswith((SF_PREFIX, SF_FILE_PREFIX))
 
 
-async def file_browser_start(paths: DuctorPaths) -> tuple[str, InlineKeyboardMarkup]:
+async def file_browser_start(
+    paths: DuctorPaths,
+    root: str = "",
+) -> tuple[str, InlineKeyboardMarkup]:
     """Build the initial ``/showfiles`` response for the root directory."""
-    return await asyncio.to_thread(_build_view, paths, "")
+    return await asyncio.to_thread(_build_view, paths, "", root)
 
 
 async def handle_file_browser_callback(
     paths: DuctorPaths,
     data: str,
+    root: str = "",
 ) -> tuple[str, InlineKeyboardMarkup | None, str | None]:
     """Route a ``sf:`` or ``sf!`` callback.
 
@@ -51,14 +55,15 @@ async def handle_file_browser_callback(
     for ``sf!`` file-request callbacks; the caller should feed it to the
     orchestrator as a normal message.
     """
+    base = _resolve_base(paths, root)
     if data.startswith(SF_FILE_PREFIX):
         rel = data[len(SF_FILE_PREFIX) :]
-        abs_dir = (paths.ductor_home / rel).resolve() if rel else paths.ductor_home.resolve()
+        abs_dir = (base / rel).resolve() if rel else base
         prompt = t("file_browser.file_request_prompt", dir=abs_dir)
         return "", None, prompt
 
     rel = data[len(SF_PREFIX) :]
-    text, keyboard = await asyncio.to_thread(_build_view, paths, rel)
+    text, keyboard = await asyncio.to_thread(_build_view, paths, rel, root)
     return text, keyboard, None
 
 
@@ -67,9 +72,21 @@ async def handle_file_browser_callback(
 # ---------------------------------------------------------------------------
 
 
-def _build_view(paths: DuctorPaths, rel: str) -> tuple[str, InlineKeyboardMarkup]:
+def _resolve_base(paths: DuctorPaths, root: str = "") -> Path:
+    """Resolve the browser root from config, falling back to ``~/.ductor``."""
+    configured = root.strip()
+    if not configured:
+        return paths.ductor_home.resolve()
+
+    base = Path(configured).expanduser()
+    if not base.is_absolute():
+        base = paths.workspace / base
+    return base.resolve()
+
+
+def _build_view(paths: DuctorPaths, rel: str, root: str = "") -> tuple[str, InlineKeyboardMarkup]:
     """Build the text + keyboard for a directory listing."""
-    base = paths.ductor_home.resolve()
+    base = _resolve_base(paths, root)
     target = (base / rel).resolve() if rel else base
 
     if not is_path_safe(target, [base]) or not target.is_dir():
@@ -83,7 +100,7 @@ def _build_view(paths: DuctorPaths, rel: str) -> tuple[str, InlineKeyboardMarkup
 
     dirs, files = list_directory(target)
 
-    display_path = f"~/.ductor/{rel}" if rel else "~/.ductor/"
+    display_path = str(target) if root.strip() else f"~/.ductor/{rel}"
     if not display_path.endswith("/"):
         display_path += "/"
 

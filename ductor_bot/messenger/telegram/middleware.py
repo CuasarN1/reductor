@@ -13,6 +13,7 @@ from aiogram import BaseMiddleware
 from aiogram.enums import ParseMode
 from aiogram.types import (
     CallbackQuery,
+    Chat,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
@@ -88,6 +89,40 @@ RejectedCallback = Callable[[int, str, str], None]
 """Sync callback for rejected group messages: (chat_id, chat_type, title)."""
 
 
+def _message_text_preview(event: Message | CallbackQuery) -> str:
+    """Return a short text preview for auth logs."""
+    if isinstance(event, Message):
+        return (event.text or event.caption or "")[:80]
+    return ""
+
+
+def _log_missing_user(event: Message | CallbackQuery) -> None:
+    """Log Telegram events that cannot be authenticated because from_user is missing."""
+    if not isinstance(event, Message):
+        return
+
+    message_chat = event.chat
+    sender_chat = getattr(event, "sender_chat", None)
+    logger.info(
+        "Auth rejected Telegram message without from_user chat_id=%s chat_type=%s "
+        "sender_chat_id=%s sender_chat_type=%s text=%r",
+        getattr(message_chat, "id", None),
+        getattr(message_chat, "type", None),
+        getattr(sender_chat, "id", None),
+        getattr(sender_chat, "type", None),
+        _message_text_preview(event),
+    )
+
+
+def _event_chat(event: Message | CallbackQuery) -> Chat | None:
+    """Resolve chat: Message.chat directly, CallbackQuery via .message.chat."""
+    if isinstance(event, Message):
+        return event.chat
+    if event.message is None:
+        return None
+    return getattr(event.message, "chat", None)
+
+
 class AuthMiddleware(BaseMiddleware):
     """Outer middleware: silently drop messages from unauthorized users/groups.
 
@@ -119,27 +154,10 @@ class AuthMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         if not user:
-            if isinstance(event, Message):
-                chat = event.chat
-                sender_chat = getattr(event, "sender_chat", None)
-                logger.info(
-                    "Auth rejected Telegram message without from_user chat_id=%s chat_type=%s "
-                    "sender_chat_id=%s sender_chat_type=%s text=%r",
-                    getattr(chat, "id", None),
-                    getattr(chat, "type", None),
-                    getattr(sender_chat, "id", None),
-                    getattr(sender_chat, "type", None),
-                    (event.text or event.caption or "")[:80],
-                )
+            _log_missing_user(event)
             return None
 
-        # Resolve chat: Message.chat directly, CallbackQuery via .message.chat.
-        chat = None
-        if isinstance(event, Message):
-            chat = event.chat
-        elif isinstance(event, CallbackQuery) and event.message is not None:
-            chat = getattr(event.message, "chat", None)
-
+        chat = _event_chat(event)
         chat_type = chat.type if chat else None
 
         if chat_type in ("group", "supergroup"):
@@ -153,7 +171,7 @@ class AuthMiddleware(BaseMiddleware):
                     getattr(chat, "title", None),
                     getattr(user, "id", None),
                     getattr(user, "username", None),
-                    ((event.text if isinstance(event, Message) else None) or "")[:80],
+                    _message_text_preview(event),
                 )
                 if self._on_rejected and chat:
                     self._on_rejected(chat.id, chat_type, chat.title or "")
@@ -171,7 +189,7 @@ class AuthMiddleware(BaseMiddleware):
                     getattr(user, "username", None),
                     getattr(sender_chat, "id", None),
                     getattr(sender_chat, "type", None),
-                    ((event.text if isinstance(event, Message) else None) or "")[:80],
+                    _message_text_preview(event),
                 )
                 return None
         elif user.id not in self._allowed_users:

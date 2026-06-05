@@ -113,6 +113,31 @@ class TestFileBrowserStart:
         assert f"{SF_PREFIX}logs" in folder_callbacks
         assert f"{SF_PREFIX}workspace" in folder_callbacks
 
+    async def test_custom_absolute_root(self, paths: DuctorPaths, tmp_path: Path) -> None:
+        root = tmp_path / "shared"
+        root.mkdir()
+        (root / "reports").mkdir()
+        (root / "summary.md").write_text("# summary", encoding="utf-8")
+
+        text, _ = await file_browser_start(paths, str(root))
+
+        assert str(root) in text
+        assert "reports/" in text
+        assert "summary.md" in text
+        assert "~/.ductor/" not in text
+
+    async def test_custom_relative_root_resolves_inside_workspace(
+        self,
+        paths: DuctorPaths,
+    ) -> None:
+        (paths.workspace / "visible").mkdir()
+        (paths.workspace / "visible" / "item.txt").write_text("ok", encoding="utf-8")
+
+        text, _ = await file_browser_start(paths, "visible")
+
+        assert str((paths.workspace / "visible").resolve()) in text
+        assert "item.txt" in text
+
 
 # ---------------------------------------------------------------------------
 # handle_file_browser_callback -- directory navigation
@@ -194,6 +219,15 @@ class TestFileRequest:
 
         assert prompt is not None
         assert str(paths.ductor_home.resolve()) in prompt
+
+    async def test_file_request_custom_root(self, paths: DuctorPaths, tmp_path: Path) -> None:
+        root = tmp_path / "shared"
+        root.mkdir()
+
+        _, _, prompt = await handle_file_browser_callback(paths, "sf!", str(root))
+
+        assert prompt is not None
+        assert str(root.resolve()) in prompt
 
 
 # ---------------------------------------------------------------------------

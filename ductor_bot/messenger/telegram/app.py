@@ -837,8 +837,8 @@ class TelegramBot:
         )
 
     async def _on_showfiles(self, message: Message) -> None:
-        """Handle /showfiles: interactive file browser for ~/.ductor."""
-        text, keyboard = await file_browser_start(self._orch.paths)
+        """Handle /showfiles: interactive file browser."""
+        text, keyboard = await file_browser_start(self._orch.paths, self._config.showfiles_root)
         await send_rich(
             self._bot,
             message.chat.id,
@@ -1331,7 +1331,11 @@ class TelegramBot:
     ) -> None:
         """Handle file browser navigation or file request."""
         chat_id = key.chat_id
-        text, keyboard, prompt = await handle_file_browser_callback(self._orch.paths, data)
+        text, keyboard, prompt = await handle_file_browser_callback(
+            self._orch.paths,
+            data,
+            self._config.showfiles_root,
+        )
 
         if prompt:
             # File request: remove the keyboard and send prompt to orchestrator
