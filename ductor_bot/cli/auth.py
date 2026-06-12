@@ -116,9 +116,12 @@ def check_claude_auth() -> AuthResult:
 
 def _claude_cli_logged_in() -> bool:
     """Run ``claude auth status`` and return True when the CLI reports logged-in."""
+    # Resolve the executable so the npm shim (claude.cmd on Windows) is found; a
+    # bare "claude" raises FileNotFoundError there, so OAuth auth is missed (#149).
+    claude_cli = shutil.which("claude") or "claude"
     try:
         proc = subprocess.run(
-            ["claude", "auth", "status"],
+            [claude_cli, "auth", "status"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -404,9 +407,12 @@ def _normalize_key_like_value(raw: str) -> str:
 
 
 def _antigravity_cli_logged_in() -> bool:
+    # Resolve the executable so the npm shim (agy.cmd on Windows) is found; a
+    # bare "agy" raises FileNotFoundError there, so OAuth auth is missed (#149).
+    agy_cli = shutil.which("agy") or "agy"
     try:
         result = subprocess.run(
-            ["agy", "models"],
+            [agy_cli, "models"],
             capture_output=True,
             text=True,
             timeout=10,

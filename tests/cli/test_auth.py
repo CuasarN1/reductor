@@ -180,6 +180,52 @@ def test_claude_cli_logged_in_returns_false_when_not_logged_in(
     assert _auth_mod._claude_cli_logged_in() is False
 
 
+def test_claude_cli_logged_in_resolves_npm_shim(monkeypatch: pytest.MonkeyPatch) -> None:
+    # On Windows "claude" resolves to claude.cmd; the probe must use the
+    # resolved path, not the bare name (#149).
+    import subprocess
+
+    import ductor_bot.cli.auth as _auth_mod
+
+    class _FakeResult:
+        stdout = '{"loggedIn": true}'
+
+    captured: list[str] = []
+
+    def _capture(cmd: list[str], *_a: object, **_kw: object) -> _FakeResult:
+        captured.extend(cmd)
+        return _FakeResult()
+
+    monkeypatch.setattr(_auth_mod.shutil, "which", lambda name: f"/bin/{name}.cmd")
+    monkeypatch.setattr(subprocess, "run", _capture)
+
+    assert _auth_mod._claude_cli_logged_in() is True
+    assert captured[0] == "/bin/claude.cmd"
+
+
+def test_antigravity_cli_logged_in_resolves_npm_shim(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    import ductor_bot.cli.auth as _auth_mod
+
+    class _FakeResult:
+        stdout = "Gemini 3.5 Flash"
+        stderr = ""
+        returncode = 0
+
+    captured: list[str] = []
+
+    def _capture(cmd: list[str], *_a: object, **_kw: object) -> _FakeResult:
+        captured.extend(cmd)
+        return _FakeResult()
+
+    monkeypatch.setattr(_auth_mod.shutil, "which", lambda name: f"/bin/{name}.cmd")
+    monkeypatch.setattr(subprocess, "run", _capture)
+
+    assert _auth_mod._antigravity_cli_logged_in() is True
+    assert captured[0] == "/bin/agy.cmd"
+
+
 def test_check_codex_auth_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.delenv("CODEX_HOME", raising=False)
