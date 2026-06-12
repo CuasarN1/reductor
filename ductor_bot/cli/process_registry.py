@@ -36,6 +36,7 @@ class ProcessRegistry:
     def __init__(self) -> None:
         self._processes: dict[int, list[TrackedProcess]] = {}
         self._aborted: set[int] = set()
+        self._aborted_topics: set[tuple[int, int | None]] = set()
         self._aborted_labels: set[tuple[int, str]] = set()
         self._interrupted: set[int] = set()
         # MED #9: serialize bulk kill operations (kill_for_task / kill_stale /
@@ -102,6 +103,30 @@ class ProcessRegistry:
             return 0
         return await _kill_processes(entries)
 
+    async def kill_by_chat_topic(self, chat_id: int, topic_id: int | None) -> int:
+        """Kill processes belonging to *chat_id* + *topic_id*. Returns count.
+
+        Used by ``/stop`` so a stop in one topic does not affect another
+        topic in the same chat. ``topic_id=None`` matches processes
+        registered without a topic (e.g. private chats).
+        """
+        async with self._kill_lock:
+            entries = self._processes.get(chat_id, [])
+            targets = [
+                t for t in entries if t.topic_id == topic_id and t.process.returncode is None
+            ]
+            if not targets:
+                return 0
+            self._aborted_topics.add((chat_id, topic_id))
+            remaining = [
+                t for t in entries if t.topic_id != topic_id or t.process.returncode is not None
+            ]
+            if remaining:
+                self._processes[chat_id] = remaining
+            else:
+                self._processes.pop(chat_id, None)
+        return await _kill_processes(targets)
+
     async def kill_all_active(self) -> int:
         """Kill active processes across all chats. Returns total count killed."""
         total = 0
@@ -116,6 +141,14 @@ class ProcessRegistry:
     def clear_abort(self, chat_id: int) -> None:
         """Clear the abort flag for *chat_id*."""
         self._aborted.discard(chat_id)
+
+    def was_aborted_topic(self, chat_id: int, topic_id: int | None) -> bool:
+        """Check whether *(chat_id, topic_id)* has been aborted since last clear."""
+        return (chat_id, topic_id) in self._aborted_topics
+
+    def clear_topic_abort(self, chat_id: int, topic_id: int | None) -> None:
+        """Clear the topic-scoped abort flag (called after handling the abort)."""
+        self._aborted_topics.discard((chat_id, topic_id))
 
     def was_interrupted(self, chat_id: int) -> bool:
         """Check whether *chat_id* was soft-interrupted since last clear."""

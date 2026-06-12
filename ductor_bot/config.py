@@ -380,6 +380,12 @@ def update_config_file(config_path: Path, **updates: object) -> None:
     from ductor_bot.infra.json_store import atomic_json_save
 
     data: dict[str, object] = json.loads(config_path.read_text(encoding="utf-8"))
+    if all(data.get(key) == value for key, value in updates.items()):
+        logger.debug(
+            "Skipped config update with unchanged values: %s",
+            ", ".join(f"{k}={v}" for k, v in updates.items()),
+        )
+        return
     data.update(updates)
     atomic_json_save(config_path, data)
     logger.info("Persisted config update: %s", ", ".join(f"{k}={v}" for k, v in updates.items()))
@@ -560,6 +566,9 @@ CLAUDE_MODELS_ORDERED: tuple[str, ...] = (
     "sonnet[1m]",
     "opus",
     "opus[1m]",
+    # Claude Code >= 2.1.172 resolves the "fable" alias to the latest Fable
+    # model (same auto-tracking as the opus/sonnet aliases).
+    "fable",
 )
 CLAUDE_MODELS: frozenset[str] = frozenset(CLAUDE_MODELS_ORDERED)
 
@@ -583,8 +592,13 @@ class ModelRegistry:
 
     @staticmethod
     def provider_for(model_id: str) -> str:
-        """Return the provider for a model ID."""
-        if model_id in CLAUDE_MODELS:
+        """Return the provider for a model ID.
+
+        Claude Code accepts both the short aliases in ``CLAUDE_MODELS`` and
+        full model IDs (``claude-opus-4-7``), so any ``claude-`` prefix
+        routes to Claude.
+        """
+        if model_id in CLAUDE_MODELS or model_id.startswith("claude-"):
             return "claude"
         if (
             model_id in _GEMINI_ALIASES

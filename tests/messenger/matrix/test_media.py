@@ -102,8 +102,8 @@ class TestDownloadMatrixMedia:
         error_resp = FakeDownloadError()
         client.download.return_value = error_resp
 
-        # Patch DownloadError inside the module to match our fake class
-        with patch("nio.DownloadError", FakeDownloadError):
+        # Patch DownloadError inside the module to match our fake class.
+        with patch("ductor_bot.messenger.matrix.media.DownloadError", FakeDownloadError):
             result = await download_matrix_media(client, event, tmp_path)
 
         assert result is None

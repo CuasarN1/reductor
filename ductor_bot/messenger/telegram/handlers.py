@@ -60,15 +60,16 @@ async def handle_abort(
     chat_id: int,
     message: Message,
 ) -> bool:
-    """Kill active CLI processes and send feedback.
+    """Kill active CLI processes in the current topic and send feedback.
 
     Returns True if handled, False if orchestrator not ready.
     """
     if orchestrator is None:
         return False
 
-    killed = await orchestrator.abort(chat_id)
-    logger.info("Abort requested killed=%d", killed)
+    thread_id = get_thread_id(message)
+    killed = await orchestrator.abort(chat_id, topic_id=thread_id)
+    logger.info("Abort requested chat=%d topic=%s killed=%d", chat_id, thread_id, killed)
     text = stop_text(bool(killed), orchestrator.active_provider_name)
     await send_rich(
         bot,

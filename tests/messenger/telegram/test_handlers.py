@@ -50,7 +50,7 @@ class TestHandleAbort:
         msg = _make_message(chat_id=42)
         result = await handle_abort(orchestrator, bot, chat_id=42, message=msg)
         assert result is True
-        orchestrator.abort.assert_called_once_with(42)
+        orchestrator.abort.assert_called_once_with(42, topic_id=None)
 
     async def test_abort_no_orchestrator(self) -> None:
         from ductor_bot.messenger.telegram.handlers import handle_abort
@@ -186,6 +186,19 @@ class TestStripMention:
 
 class TestForumTopicPropagation:
     """Test that handlers extract and propagate thread_id."""
+
+    @patch("ductor_bot.messenger.telegram.handlers.send_rich", new_callable=AsyncMock)
+    async def test_abort_entrypoint_passes_topic_id(self, _mock_send: AsyncMock) -> None:
+        from ductor_bot.messenger.telegram.handlers import handle_abort
+
+        orchestrator = MagicMock()
+        orchestrator.abort = AsyncMock(return_value=1)
+        orchestrator.active_provider_name = "claude"
+        bot = MagicMock()
+        msg = _make_message(chat_id=42, topic_thread_id=99)
+
+        await handle_abort(orchestrator, bot, chat_id=42, message=msg)
+        orchestrator.abort.assert_called_once_with(42, topic_id=99)
 
     @patch("ductor_bot.messenger.telegram.handlers.send_rich", new_callable=AsyncMock)
     async def test_handle_abort_passes_thread_id(self, mock_send: AsyncMock) -> None:

@@ -17,6 +17,7 @@ def get_bot_commands() -> list[tuple[str, str]]:
     return [
         # Daily
         ("new", t_cmd("bot.new")),
+        ("reset", t_cmd("bot.reset")),
         ("stop", t_cmd("bot.stop")),
         ("interrupt", t_cmd("bot.interrupt")),
         ("model", t_cmd("bot.model")),

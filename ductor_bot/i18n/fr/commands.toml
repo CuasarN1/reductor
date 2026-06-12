@@ -2,6 +2,7 @@
 
 [bot]
 new = "Nouveau chat"
+reset = "Réinitialiser chat"
 stop = "Stopper actuel + file"
 interrupt = "Interrompre, garder file"
 model = "Modèle actuel/changer"

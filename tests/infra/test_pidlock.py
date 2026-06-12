@@ -26,7 +26,10 @@ class TestIsProcessAlive:
     def test_permission_error_means_alive(self) -> None:
         from ductor_bot.infra.pidlock import _is_process_alive
 
-        with patch("os.kill", side_effect=PermissionError):
+        with (
+            patch("ductor_bot.infra.pidlock.is_windows", return_value=False),
+            patch("os.kill", side_effect=PermissionError),
+        ):
             assert _is_process_alive(999) is True
 
 

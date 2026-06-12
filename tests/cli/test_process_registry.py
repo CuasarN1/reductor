@@ -179,6 +179,64 @@ def test_has_active_topic_id_ignores_exited() -> None:
     assert reg.has_active(1, topic_id=20) is True
 
 
+class TestKillByChatTopicAbortMarker:
+    """Topic-scoped /stop marker behavior."""
+
+    async def test_sets_topic_abort_marker(self) -> None:
+        reg = ProcessRegistry()
+        proc = _mock_process(pid=80)
+        reg.register(chat_id=1, process=proc, label="main", topic_id=10)
+
+        with patch(
+            "ductor_bot.cli.process_registry._kill_processes",
+            new_callable=AsyncMock,
+            return_value=1,
+        ):
+            killed = await reg.kill_by_chat_topic(1, 10)
+
+        assert killed == 1
+        assert reg.was_aborted_topic(1, 10) is True
+        assert reg.was_aborted(1) is False
+
+    async def test_no_kill_no_marker(self) -> None:
+        reg = ProcessRegistry()
+        proc = _mock_process(pid=81)
+        reg.register(chat_id=1, process=proc, label="main", topic_id=10)
+
+        killed = await reg.kill_by_chat_topic(1, 20)
+
+        assert killed == 0
+        assert reg.was_aborted_topic(1, 20) is False
+        assert reg.was_aborted_topic(1, 10) is False
+
+    def test_clear_topic_abort_removes_marker(self) -> None:
+        reg = ProcessRegistry()
+        reg._aborted_topics.add((1, 10))
+
+        assert reg.was_aborted_topic(1, 10) is True
+        reg.clear_topic_abort(1, 10)
+        assert reg.was_aborted_topic(1, 10) is False
+
+    async def test_topic_a_kill_does_not_kill_topic_b(self) -> None:
+        reg = ProcessRegistry()
+        proc_a = _mock_process(pid=82)
+        proc_b = _mock_process(pid=83)
+        reg.register(chat_id=1, process=proc_a, label="main", topic_id=10)
+        reg.register(chat_id=1, process=proc_b, label="main", topic_id=20)
+
+        with patch(
+            "ductor_bot.cli.process_registry._kill_processes",
+            new_callable=AsyncMock,
+            return_value=1,
+        ):
+            killed = await reg.kill_by_chat_topic(1, 10)
+
+        assert killed == 1
+        assert reg.has_active(1, topic_id=10) is False
+        assert reg.has_active(1, topic_id=20) is True
+        assert proc_b.returncode is None
+
+
 async def test_kill_stale_handles_already_exited() -> None:
     reg = ProcessRegistry()
     proc = _mock_process(pid=40, returncode=0)

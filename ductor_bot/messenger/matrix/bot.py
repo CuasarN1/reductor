@@ -580,6 +580,14 @@ class MatrixBot:
             if result and result.text:
                 await self._send_rich(room_id, result.text)
 
+    async def _cmd_reset(self, *, text: str, room_id: str, key: SessionKey, event: object) -> None:
+        """Reset the current provider session."""
+        orch = self._orchestrator
+        if orch:
+            result = await orch.handle_message(key, "/reset")
+            if result and result.text:
+                await self._send_rich(room_id, result.text)
+
     async def _cmd_help(self, *, text: str, room_id: str, key: SessionKey, event: object) -> None:
         """Show command reference."""
         await self._send_rich(room_id, self._build_help_text())
@@ -709,6 +717,7 @@ class MatrixBot:
         "interrupt": _cmd_interrupt,
         "restart": _cmd_restart,
         "new": _cmd_new,
+        "reset": _cmd_reset,
         "help": _cmd_help,
         "start": _cmd_help,
         "info": _cmd_info,
@@ -749,8 +758,8 @@ class MatrixBot:
         return fmt(
             t("help.header"),
             SEP,
-            f"**{t('help.cat_daily')}**\n{_line('new')}\n{_line('stop')}\n{_line('stop_all')}\n"
-            f"{_line('model')}\n{_line('status')}\n{_line('memory')}",
+            f"**{t('help.cat_daily')}**\n{_line('new')}\n{_line('reset')}\n{_line('stop')}\n"
+            f"{_line('stop_all')}\n{_line('model')}\n{_line('status')}\n{_line('memory')}",
             f"**{t('help.cat_automation')}**\n{_line('session')}\n{_line('tasks')}\n{_line('cron')}",
             f"**{t('help.cat_multiagent')}**\n{_line('agent_commands')}\n{_line('agents')}\n"
             f"{_line('agent_start')}\n{_line('agent_stop')}\n{_line('agent_restart')}",

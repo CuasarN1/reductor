@@ -2,6 +2,7 @@
 
 [bot]
 new = "Start new chat"
+reset = "Reset current chat"
 stop = "Stop current + queued msgs"
 interrupt = "Interrupt current, keep queue"
 model = "Show/switch model"

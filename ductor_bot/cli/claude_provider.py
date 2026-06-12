@@ -99,7 +99,7 @@ class ClaudeCodeCLI(BaseCLI):
     ) -> CLIResponse:
         """Send a prompt and return the final result."""
         cmd = self._build_command(prompt, resume_session, continue_session)
-        exec_cmd, use_cwd = docker_wrap(cmd, self._config)
+        exec_cmd, use_cwd = docker_wrap(cmd, self._config, interactive=_IS_WINDOWS)
         _log_cmd(exec_cmd)
         return await run_oneshot_subprocess(
             config=self._config,
@@ -135,7 +135,7 @@ class ClaudeCodeCLI(BaseCLI):
     ) -> AsyncGenerator[StreamEvent, None]:
         """Send a prompt and yield stream events as they arrive."""
         cmd = self._build_command_streaming(prompt, resume_session, continue_session)
-        exec_cmd, use_cwd = docker_wrap(cmd, self._config)
+        exec_cmd, use_cwd = docker_wrap(cmd, self._config, interactive=_IS_WINDOWS)
         _log_cmd(exec_cmd, streaming=True)
 
         async for event in run_streaming_subprocess(

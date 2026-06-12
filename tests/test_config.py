@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -15,6 +17,7 @@ from ductor_bot.config import (
     StreamingConfig,
     deep_merge_config,
     reset_gemini_models,
+    update_config_file,
 )
 
 # -- AgentConfig defaults --
@@ -101,6 +104,28 @@ def test_deep_merge_no_change() -> None:
     assert changed is False
 
 
+def test_update_config_file_skips_unchanged_values(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"provider": "codex", "model": "gpt-5.1-codex"}\n', encoding="utf-8")
+    writes = 0
+
+    def fake_atomic_json_save(_path: Path, _data: object) -> None:
+        nonlocal writes
+        writes += 1
+
+    monkeypatch.setattr("ductor_bot.infra.json_store.atomic_json_save", fake_atomic_json_save)
+
+    update_config_file(config_path, provider="codex", model="gpt-5.1-codex")
+
+    assert writes == 0
+    assert config_path.read_text(encoding="utf-8") == (
+        '{"provider": "codex", "model": "gpt-5.1-codex"}\n'
+    )
+
+
 # -- ModelRegistry --
 
 
@@ -109,6 +134,19 @@ def test_registry_provider_for_claude() -> None:
     assert reg.provider_for("opus") == "claude"
     assert reg.provider_for("sonnet") == "claude"
     assert reg.provider_for("haiku") == "claude"
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "claude-opus-4-7",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5-20251001",
+    ],
+)
+def test_registry_provider_for_full_claude_model_ids(model_id: str) -> None:
+    reg = ModelRegistry()
+    assert reg.provider_for(model_id) == "claude"
 
 
 def test_registry_provider_for_codex() -> None:

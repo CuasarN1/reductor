@@ -66,8 +66,9 @@ class TestGeneratePlistData:
             data = _generate_plist_data("ductor")
 
         path_value = data["EnvironmentVariables"]["PATH"]
-        assert f"{tmp_path}/.nvm/versions/node/v24.0.0/bin" in path_value
-        assert f"{tmp_path}/.nvm/versions/node/v22.0.0/bin" in path_value
+        home = tmp_path.as_posix()
+        assert f"{home}/.nvm/versions/node/v24.0.0/bin" in path_value
+        assert f"{home}/.nvm/versions/node/v22.0.0/bin" in path_value
 
     def test_has_log_paths(self) -> None:
         data = _generate_plist_data("ductor")

@@ -2,6 +2,7 @@
 
 [bot]
 new = "Nuevo chat"
+reset = "Reiniciar chat"
 stop = "Detener actual + cola"
 interrupt = "Interrumpir, mantener cola"
 model = "Ver/cambiar modelo"
