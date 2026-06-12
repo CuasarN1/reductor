@@ -30,6 +30,14 @@ from ductor_bot.cli.stream_events import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _default_non_windows_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep platform-sensitive command tests stable on Windows hosts."""
+    monkeypatch.setattr("ductor_bot.cli.base._IS_WINDOWS", False)
+    monkeypatch.setattr("ductor_bot.cli.executor._IS_WINDOWS", False)
+    monkeypatch.setattr("ductor_bot.cli.codex_provider._IS_WINDOWS", False)
+
+
 def _make_cli(monkeypatch: pytest.MonkeyPatch, **overrides: Any) -> CodexCLI:
     monkeypatch.setattr("ductor_bot.cli.codex_provider.which", lambda _: "/usr/bin/codex")
     return CodexCLI(
@@ -53,6 +61,7 @@ def _make_process_mock(
     proc.pid = 12345
     proc.kill = MagicMock()
     proc.wait = AsyncMock()
+    proc.stdin = MagicMock()
     return proc
 
 
@@ -67,6 +76,7 @@ def _make_streaming_process(
     proc.pid = 12345
     proc.kill = MagicMock()
     proc.wait = AsyncMock()
+    proc.stdin = MagicMock()
 
     # stdout readline mock: returns each line as bytes, then b""
     encoded_lines = [line.encode() + b"\n" for line in lines] + [b""]

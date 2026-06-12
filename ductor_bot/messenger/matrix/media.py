@@ -22,6 +22,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+try:
+    from nio import DownloadError
+except ImportError:  # pragma: no cover - exercised when matrix extra is absent
+
+    class DownloadError:  # type: ignore[no-redef]
+        """Fallback marker for test and no-matrix-extra environments."""
+
+        message: str = ""
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -80,8 +89,6 @@ async def download_matrix_media(
 
     Returns ``None`` when the event has no downloadable URL.
     """
-    from nio import DownloadError
-
     mxc_url: str | None = getattr(event, "url", None)
     if not mxc_url:
         return None

@@ -48,7 +48,10 @@ def collect_nvm_bin_dirs(home: Path) -> list[str]:
     nvm_dir = home / ".nvm"
     if not nvm_dir.is_dir():
         return []
-    return [str(node_dir) for node_dir in sorted(nvm_dir.glob("versions/node/*/bin"), reverse=True)]
+    return [
+        node_dir.as_posix()
+        for node_dir in sorted(nvm_dir.glob("versions/node/*/bin"), reverse=True)
+    ]
 
 
 # ---------------------------------------------------------------------------

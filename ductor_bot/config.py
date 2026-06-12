@@ -379,6 +379,12 @@ def update_config_file(config_path: Path, **updates: object) -> None:
     from ductor_bot.infra.json_store import atomic_json_save
 
     data: dict[str, object] = json.loads(config_path.read_text(encoding="utf-8"))
+    if all(data.get(key) == value for key, value in updates.items()):
+        logger.debug(
+            "Skipped config update with unchanged values: %s",
+            ", ".join(f"{k}={v}" for k, v in updates.items()),
+        )
+        return
     data.update(updates)
     atomic_json_save(config_path, data)
     logger.info("Persisted config update: %s", ", ".join(f"{k}={v}" for k, v in updates.items()))

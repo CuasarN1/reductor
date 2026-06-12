@@ -256,7 +256,7 @@ async def send_file(
         logger.warning("File not found, skipping: %s", path)
         await bot.send_message(
             chat_id=chat_id,
-            text=f"[File not found: {path.name}]",
+            text=f"[File not found: {path.name} (Tried host path: {path})]",
             parse_mode=None,
             message_thread_id=thread_id,
         )
