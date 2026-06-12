@@ -60,6 +60,8 @@ async def _inject_prompt(  # noqa: PLR0913
         topic_id=topic_id,
         transport=transport,
         process_label=process_label,
+        provider_override=active.provider if active else None,
+        model_override=active.model if active else None,
         resume_session=resume_id,
         timeout_seconds=orch._config.cli_timeout,
     )
