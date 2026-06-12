@@ -559,6 +559,9 @@ CLAUDE_MODELS_ORDERED: tuple[str, ...] = (
     "sonnet[1m]",
     "opus",
     "opus[1m]",
+    # Claude Code >= 2.1.172 resolves the "fable" alias to the latest Fable
+    # model (same auto-tracking as the opus/sonnet aliases).
+    "fable",
 )
 CLAUDE_MODELS: frozenset[str] = frozenset(CLAUDE_MODELS_ORDERED)
 
