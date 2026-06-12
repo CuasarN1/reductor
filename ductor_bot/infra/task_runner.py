@@ -58,6 +58,13 @@ async def run_oneshot_task(
 
     if options.ductor_home is not None:
         one_shot.env_overrides["DUCTOR_HOME"] = str(options.ductor_home)
+        import os
+
+        from ductor_bot.infra.env_secrets import load_env_secrets
+
+        for k, v in load_env_secrets(options.ductor_home / ".env").items():
+            if k not in os.environ and k not in one_shot.env_overrides:
+                one_shot.env_overrides[k] = v
     execution = await execute_one_shot(
         one_shot,
         cwd=options.cwd,
