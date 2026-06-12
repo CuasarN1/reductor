@@ -210,8 +210,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--provider",
-        choices=["claude", "codex", "gemini"],
-        help="CLI provider for this job (claude, codex, or gemini). If omitted, uses global config.",
+        choices=["claude", "codex", "gemini", "antigravity"],
+        help=(
+            "CLI provider for this job (claude, codex, gemini, or antigravity). "
+            "If omitted, uses global config."
+        ),
     )
     parser.add_argument(
         "--model",

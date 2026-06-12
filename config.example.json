@@ -101,7 +101,12 @@
         "chat_id": 123456789,
         "allow_public": false
     },
-    "cli_parameters": {"claude": ["--verbose", "--chrome"], "codex": [], "gemini": []},
+    "cli_parameters": {
+        "claude": ["--verbose", "--chrome"],
+        "codex": [],
+        "gemini": [],
+        "antigravity": []
+    },
     "image": {"max_dimension": 2000, "output_format": "webp", "quality": 85},
     "scene": {"seen_reaction": false, "status_reaction": true, "technical_footer": false},
     "notifications": {

@@ -162,6 +162,11 @@ def test_registry_provider_for_gemini_prefix() -> None:
     assert reg.provider_for("gemini-2.5-pro") == "gemini"
 
 
+def test_registry_provider_for_antigravity() -> None:
+    reg = ModelRegistry()
+    assert reg.provider_for("antigravity-default") == "antigravity"
+
+
 def test_streaming_config_fields() -> None:
     s = StreamingConfig(enabled=False, min_chars=100)
     assert s.enabled is False

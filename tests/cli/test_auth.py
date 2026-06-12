@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from ductor_bot.cli.auth import (
     AuthResult,
     AuthStatus,
+    check_antigravity_auth,
     check_claude_auth,
     check_codex_auth,
     check_gemini_auth,
@@ -477,3 +478,111 @@ def test_gemini_uses_api_key_mode_false_for_oauth(
     )
 
     assert gemini_uses_api_key_mode() is False
+
+
+# -- Antigravity auth --
+
+
+def test_check_antigravity_auth_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import ductor_bot.cli.auth as _auth_mod
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(_auth_mod.shutil, "which", lambda _cmd: None)
+
+    result = check_antigravity_auth()
+
+    assert result.provider == "antigravity"
+    assert result.status == AuthStatus.NOT_FOUND
+
+
+def test_check_antigravity_auth_installed_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import ductor_bot.cli.auth as _auth_mod
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(_auth_mod.shutil, "which", lambda _cmd: "C:/agy/bin/agy.exe")
+    monkeypatch.setattr(_auth_mod, "_antigravity_cli_logged_in", lambda: False)
+
+    result = check_antigravity_auth()
+
+    assert result.status == AuthStatus.INSTALLED
+
+
+def test_check_antigravity_auth_authenticated_via_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import ductor_bot.cli.auth as _auth_mod
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(_auth_mod.shutil, "which", lambda _cmd: "C:/agy/bin/agy.exe")
+    monkeypatch.setattr(_auth_mod, "_antigravity_cli_logged_in", lambda: True)
+
+    result = check_antigravity_auth()
+
+    assert result.status == AuthStatus.AUTHENTICATED
+
+
+def test_check_antigravity_auth_ccs_settings_are_only_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import ductor_bot.cli.auth as _auth_mod
+
+    settings = tmp_path / ".ccs" / "agy.settings.json"
+    settings.parent.mkdir()
+    settings.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(_auth_mod.shutil, "which", lambda _cmd: None)
+
+    result = check_antigravity_auth()
+
+    assert result.status == AuthStatus.INSTALLED
+
+
+def test_antigravity_cli_logged_in_returns_true_for_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess
+
+    import ductor_bot.cli.auth as _auth_mod
+
+    class _FakeResult:
+        returncode = 0
+        stdout = "claude-sonnet-4-5\n"
+        stderr = ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_kw: _FakeResult())
+
+    assert _auth_mod._antigravity_cli_logged_in() is True
+
+
+def test_antigravity_cli_logged_in_returns_false_for_login_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess
+
+    import ductor_bot.cli.auth as _auth_mod
+
+    class _FakeResult:
+        returncode = 1
+        stdout = ""
+        stderr = "Please sign in to view available models"
+
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_kw: _FakeResult())
+
+    assert _auth_mod._antigravity_cli_logged_in() is False
+
+
+def test_antigravity_cli_logged_in_returns_false_on_probe_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess
+
+    import ductor_bot.cli.auth as _auth_mod
+
+    def _raise(*_a: object, **_kw: object) -> None:
+        raise subprocess.TimeoutExpired(["agy", "models"], timeout=10)
+
+    monkeypatch.setattr(subprocess, "run", _raise)
+
+    assert _auth_mod._antigravity_cli_logged_in() is False

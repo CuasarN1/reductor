@@ -131,6 +131,20 @@ def test_update_available_providers() -> None:
     assert svc._available_providers == frozenset({"claude", "codex"})
 
 
+def test_cli_parameters_for_antigravity() -> None:
+    cfg = CLIServiceConfig(
+        working_dir="/tmp",
+        default_model="antigravity-default",
+        provider="antigravity",
+        max_turns=None,
+        max_budget_usd=None,
+        permission_mode="bypassPermissions",
+        antigravity_cli_parameters=("--log-file", "agy.log"),
+    )
+
+    assert cfg.cli_parameters_for_provider("antigravity") == ["--log-file", "agy.log"]
+
+
 async def test_stream_callbacks_dispatches_compact_boundary() -> None:
     """CompactBoundaryEvent fires on_compact_boundary and on_status(None), in order."""
     from ductor_bot.cli.service import _StreamCallbacks

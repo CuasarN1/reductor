@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 
 from ductor_bot.cli.base import CLIConfig
-from ductor_bot.cli.executor import _build_subprocess_env
+from ductor_bot.cli.executor import build_subprocess_env
 
 
 def test_transcribe_env_unset_not_injected(tmp_path: Path) -> None:
     cfg = CLIConfig(working_dir=tmp_path)
-    env = _build_subprocess_env(cfg)
+    env = build_subprocess_env(cfg)
 
     assert env is not None
     assert "DUCTOR_TRANSCRIBE_COMMAND" not in env
@@ -21,7 +21,7 @@ def test_transcribe_env_unset_not_injected(tmp_path: Path) -> None:
 
 def test_transcribe_env_set(tmp_path: Path) -> None:
     cfg = CLIConfig(working_dir=tmp_path, transcribe_command="/usr/bin/my-transcribe --fast")
-    env = _build_subprocess_env(cfg)
+    env = build_subprocess_env(cfg)
 
     assert env is not None
     assert env["DUCTOR_TRANSCRIBE_COMMAND"] == "/usr/bin/my-transcribe --fast"
@@ -33,7 +33,7 @@ def test_video_transcribe_env_set(tmp_path: Path) -> None:
         working_dir=tmp_path,
         video_transcribe_command="~/.local/bin/vid-transcribe.sh",
     )
-    env = _build_subprocess_env(cfg)
+    env = build_subprocess_env(cfg)
 
     assert env is not None
     assert env["DUCTOR_VIDEO_TRANSCRIBE_COMMAND"] == "~/.local/bin/vid-transcribe.sh"
@@ -46,7 +46,7 @@ def test_both_transcribe_env_vars_set(tmp_path: Path) -> None:
         transcribe_command="a.sh",
         video_transcribe_command="b.sh",
     )
-    env = _build_subprocess_env(cfg)
+    env = build_subprocess_env(cfg)
 
     assert env is not None
     assert env["DUCTOR_TRANSCRIBE_COMMAND"] == "a.sh"

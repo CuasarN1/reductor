@@ -13,6 +13,8 @@ def test_cli_parameters_config_defaults() -> None:
     config = CLIParametersConfig()
     assert config.claude == []
     assert config.codex == []
+    assert config.gemini == []
+    assert config.antigravity == []
 
 
 def test_cli_parameters_config_with_values() -> None:
@@ -20,9 +22,13 @@ def test_cli_parameters_config_with_values() -> None:
     config = CLIParametersConfig(
         claude=["--fast", "--no-cache"],
         codex=["--verbose", "--debug"],
+        gemini=["--experimental"],
+        antigravity=["--log-file", "agy.log"],
     )
     assert config.claude == ["--fast", "--no-cache"]
     assert config.codex == ["--verbose", "--debug"]
+    assert config.gemini == ["--experimental"]
+    assert config.antigravity == ["--log-file", "agy.log"]
 
 
 def test_agent_config_includes_cli_parameters() -> None:
@@ -32,6 +38,8 @@ def test_agent_config_includes_cli_parameters() -> None:
     assert isinstance(config.cli_parameters, CLIParametersConfig)
     assert config.cli_parameters.claude == []
     assert config.cli_parameters.codex == []
+    assert config.cli_parameters.gemini == []
+    assert config.cli_parameters.antigravity == []
 
 
 def test_agent_config_with_cli_parameters() -> None:
@@ -40,10 +48,12 @@ def test_agent_config_with_cli_parameters() -> None:
         cli_parameters=CLIParametersConfig(
             claude=["--fast"],
             codex=["--verbose"],
+            antigravity=["--log-file", "agy.log"],
         ),
     )
     assert config.cli_parameters.claude == ["--fast"]
     assert config.cli_parameters.codex == ["--verbose"]
+    assert config.cli_parameters.antigravity == ["--log-file", "agy.log"]
 
 
 def test_agent_config_json_round_trip_with_cli_parameters() -> None:
@@ -52,6 +62,7 @@ def test_agent_config_json_round_trip_with_cli_parameters() -> None:
         cli_parameters=CLIParametersConfig(
             claude=["--fast", "--no-cache"],
             codex=["--verbose"],
+            antigravity=["--log-file", "agy.log"],
         ),
     )
 
@@ -65,6 +76,7 @@ def test_agent_config_json_round_trip_with_cli_parameters() -> None:
 
     assert restored.cli_parameters.claude == ["--fast", "--no-cache"]
     assert restored.cli_parameters.codex == ["--verbose"]
+    assert restored.cli_parameters.antigravity == ["--log-file", "agy.log"]
 
 
 def test_deep_merge_preserves_cli_parameters() -> None:
@@ -131,6 +143,8 @@ def test_deep_merge_nested_cli_parameters() -> None:
     # Missing codex should be added from defaults
     assert "codex" in merged["cli_parameters"]
     assert merged["cli_parameters"]["codex"] == []
+    assert "antigravity" in merged["cli_parameters"]
+    assert merged["cli_parameters"]["antigravity"] == []
     assert changed is True
 
 

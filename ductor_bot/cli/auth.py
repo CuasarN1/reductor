@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -402,10 +403,46 @@ def _normalize_key_like_value(raw: str) -> str:
     return value
 
 
+def _antigravity_cli_logged_in() -> bool:
+    try:
+        result = subprocess.run(
+            ["agy", "models"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.debug("Antigravity CLI auth probe failed: %s", exc)
+        return False
+
+    output = f"{result.stdout}\n{result.stderr}".lower()
+    if "sign in" in output or "not logged in" in output or "login" in output:
+        return False
+    return result.returncode == 0
+
+
+def check_antigravity_auth() -> AuthResult:
+    """Check if Antigravity CLI (agy) is installed and configured."""
+    binary = shutil.which("agy")
+    if binary is not None and _antigravity_cli_logged_in():
+        logger.debug("Auth check provider=antigravity status=AUTHENTICATED (agy models)")
+        return AuthResult(provider="antigravity", status=AuthStatus.AUTHENTICATED)
+
+    ccs_settings = Path.home() / ".ccs" / "agy.settings.json"
+    if binary is not None or ccs_settings.is_file():
+        logger.debug("Auth check provider=antigravity status=INSTALLED")
+        return AuthResult(provider="antigravity", status=AuthStatus.INSTALLED)
+
+    logger.debug("Auth check provider=antigravity status=NOT_FOUND")
+    return AuthResult(provider="antigravity", status=AuthStatus.NOT_FOUND)
+
+
 _CHECKERS: dict[str, Callable[[], AuthResult]] = {
     "claude": check_claude_auth,
     "codex": check_codex_auth,
     "gemini": check_gemini_auth,
+    "antigravity": check_antigravity_auth,
 }
 
 

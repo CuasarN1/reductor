@@ -21,6 +21,7 @@ from rich.text import Text
 from ductor_bot.cli.auth import (
     AuthResult,
     AuthStatus,
+    check_antigravity_auth,
     check_claude_auth,
     check_codex_auth,
     check_gemini_auth,
@@ -110,6 +111,7 @@ def _check_clis(console: Console) -> None:
         ("claude", check_claude_auth),
         ("codex", check_codex_auth),
         ("gemini", check_gemini_auth),
+        ("antigravity", check_antigravity_auth),
     )
     for name, fn in probes:
         try:
@@ -122,18 +124,15 @@ def _check_clis(console: Console) -> None:
                 t_rich(f"wizard.cli_backends.{name}_check_failed", error=str(exc)),
             )
 
-    claude = results["claude"]
-    codex = results["codex"]
-    gemini = results["gemini"]
-
     lines = [
         t_rich("wizard.cli_backends.header"),
-        t_rich("wizard.cli_backends.claude", status=_STATUS_ICON[claude.status]),
-        t_rich("wizard.cli_backends.codex", status=_STATUS_ICON[codex.status]),
-        t_rich("wizard.cli_backends.gemini", status=_STATUS_ICON[gemini.status]),
+        *(
+            t_rich(f"wizard.cli_backends.{name}", status=_STATUS_ICON[results[name].status])
+            for name, _fn in probes
+        ),
     ]
 
-    has_auth = claude.is_authenticated or codex.is_authenticated or gemini.is_authenticated
+    has_auth = any(results[name].is_authenticated for name, _fn in probes)
 
     if has_auth:
         border = "green"

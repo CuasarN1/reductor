@@ -229,6 +229,7 @@ class CLIParametersConfig(BaseModel):
     claude: list[str] = Field(default_factory=list)
     codex: list[str] = Field(default_factory=list)
     gemini: list[str] = Field(default_factory=list)
+    antigravity: list[str] = Field(default_factory=list)
 
 
 class MatrixConfig(BaseModel):
@@ -574,6 +575,10 @@ CLAUDE_MODELS: frozenset[str] = frozenset(CLAUDE_MODELS_ORDERED)
 # "auto" is a Gemini-specific alias (Gemini CLI auto-selects the best model).
 _GEMINI_ALIASES: frozenset[str] = frozenset({"auto", "pro", "flash", "flash-lite"})
 
+# Antigravity currently exposes a provider-level default through its CLI bridge.
+ANTIGRAVITY_MODELS_ORDERED: tuple[str, ...] = ("antigravity-default",)
+ANTIGRAVITY_MODELS: frozenset[str] = frozenset(ANTIGRAVITY_MODELS_ORDERED)
+
 _runtime_gemini: list[frozenset[str]] = [frozenset()]
 
 
@@ -601,6 +606,8 @@ class ModelRegistry:
             or model_id.startswith(("gemini-", "auto-gemini-"))
         ):
             return "gemini"
+        if model_id in ANTIGRAVITY_MODELS or model_id.startswith("antigravity-"):
+            return "antigravity"
         return "codex"
 
 

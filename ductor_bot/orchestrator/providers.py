@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from ductor_bot.config import (
     _GEMINI_ALIASES,
+    ANTIGRAVITY_MODELS,
     CLAUDE_MODELS,
     ModelRegistry,
     get_gemini_models,
@@ -73,6 +74,8 @@ class ProviderManager:
             return "Claude Code"
         if provider == "gemini":
             return "Gemini"
+        if provider == "antigravity":
+            return "Antigravity"
         return "Codex"
 
     # -- Auth / init ----------------------------------------------------------
@@ -132,7 +135,9 @@ class ProviderManager:
 
     def refresh_known_model_ids(self) -> None:
         """Refresh directive-known model IDs from dynamic provider registries."""
-        self._known_model_ids = CLAUDE_MODELS | _GEMINI_ALIASES | get_gemini_models()
+        self._known_model_ids = (
+            CLAUDE_MODELS | ANTIGRAVITY_MODELS | _GEMINI_ALIASES | get_gemini_models()
+        )
 
     def resolve_runtime_target(self, requested_model: str | None = None) -> tuple[str, str]:
         """Resolve requested model to the effective ``(model, provider)`` pair."""
@@ -159,6 +164,8 @@ class ProviderManager:
             return ""
         if provider == "gemini":
             return ""
+        if provider == "antigravity":
+            return "antigravity-default"
         return ""
 
     def resolve_session_directive(self, key: str) -> tuple[str, str] | None:
@@ -169,7 +176,7 @@ class ProviderManager:
         - known model   (``@opus``)  -> (inferred_provider, model)
         - unknown                    -> None
         """
-        if key in ("claude", "codex", "gemini"):
+        if key in ("claude", "codex", "gemini", "antigravity"):
             return key, self.default_model_for_provider(key)
         if self.is_known_model(key):
             provider = self._models.provider_for(key)
@@ -190,6 +197,7 @@ class ProviderManager:
             "claude": ("Claude Code", "#F97316"),
             "gemini": ("Gemini", "#8B5CF6"),
             "codex": ("Codex", "#10B981"),
+            "antigravity": ("Antigravity", "#3B82F6"),
         }
         providers: list[dict[str, object]] = []
         for pid in sorted(self._available_providers):
@@ -203,6 +211,8 @@ class ProviderManager:
             elif pid == "codex":
                 cache = codex_cache_obs.get_cache() if codex_cache_obs else None
                 models = [m.id for m in cache.models] if cache and cache.models else []
+            elif pid == "antigravity":
+                models = sorted(ANTIGRAVITY_MODELS)
             else:
                 models = []
             providers.append({"id": pid, "name": name, "color": color, "models": models})

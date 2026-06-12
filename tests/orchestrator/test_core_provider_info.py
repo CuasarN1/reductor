@@ -84,6 +84,12 @@ class TestBuildProviderInfo:
         info = pm.build_provider_info(obs)
         assert info[0]["models"] == []
 
+    def test_antigravity_models(self) -> None:
+        pm, obs = _make_provider_manager(frozenset({"antigravity"}))
+        info = pm.build_provider_info(obs)
+        assert info[0]["id"] == "antigravity"
+        assert info[0]["models"] == ["antigravity-default"]
+
     def test_empty_providers(self) -> None:
         pm, obs = _make_provider_manager(frozenset())
         info = pm.build_provider_info(obs)

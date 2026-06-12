@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ductor_bot.cli.base import CLIConfig, docker_wrap
-from ductor_bot.cli.executor import _build_subprocess_env
+from ductor_bot.cli.executor import build_subprocess_env
 from ductor_bot.infra.env_secrets import clear_cache
 
 
@@ -19,7 +19,7 @@ def test_subprocess_env_merges_secrets(tmp_path: Path) -> None:
 
     config = CLIConfig(working_dir=str(workspace))
     clear_cache()
-    env = _build_subprocess_env(config)
+    env = build_subprocess_env(config)
 
     assert env is not None
     assert env["MY_SECRET"] == "hunter2"
@@ -34,7 +34,7 @@ def test_subprocess_env_does_not_override_existing(tmp_path: Path) -> None:
 
     config = CLIConfig(working_dir=str(workspace))
     clear_cache()
-    env = _build_subprocess_env(config)
+    env = build_subprocess_env(config)
 
     assert env is not None
     assert env["PATH"] != "/evil"
@@ -47,7 +47,7 @@ def test_subprocess_env_works_without_env_file(tmp_path: Path) -> None:
 
     config = CLIConfig(working_dir=str(workspace))
     clear_cache()
-    env = _build_subprocess_env(config)
+    env = build_subprocess_env(config)
 
     assert env is not None
     assert "DUCTOR_AGENT_NAME" in env

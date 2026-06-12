@@ -1,12 +1,12 @@
 # cli/
 
-Provider-agnostic CLI execution layer for Claude Code, Codex, and Gemini.
+Provider-agnostic CLI execution layer for Claude Code, Codex, Gemini, and Antigravity.
 
 ## Files
 
 - `types.py`: `AgentRequest`, `AgentResponse`, `CLIResponse`
 - `base.py`: `BaseCLI`, `CLIConfig`, `docker_wrap()`, Windows helpers
-- `factory.py`: provider factory (`claude` / `codex` / `gemini`)
+- `factory.py`: provider factory (`claude` / `codex` / `gemini` / `antigravity`)
 - `service.py`: `CLIService` gateway for orchestrator
 - `init_wizard.py`: interactive onboarding and smart reset flow
 - `executor.py`: shared subprocess lifecycle helpers for provider wrappers
@@ -15,9 +15,11 @@ Provider-agnostic CLI execution layer for Claude Code, Codex, and Gemini.
 - `claude_provider.py`: Claude subprocess wrapper
 - `codex_provider.py`: Codex subprocess wrapper
 - `gemini_provider.py`: Gemini subprocess wrapper
+- `antigravity_provider.py`: Antigravity (`agy`) subprocess wrapper — always runs on the host, even with the Docker sandbox enabled (the sandbox image ships no `agy` binary or auth state)
 - `stream_events.py`: normalized stream events + Claude stream parser
 - `codex_events.py`: Codex JSONL parser
 - `gemini_events.py`: Gemini NDJSON + JSON parser
+- `antigravity_events.py`: Antigravity stream/JSON parser
 - `coalescer.py`: streaming text coalescing buffer used by bot streaming dispatch
 - `gemini_utils.py`: Gemini CLI discovery, trusted folder, model discovery helpers
 - `codex_discovery.py`: Codex model discovery via `codex app-server` JSON-RPC

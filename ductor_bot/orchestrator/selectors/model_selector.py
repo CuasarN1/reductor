@@ -8,7 +8,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ductor_bot.cli.auth import AuthStatus, check_all_auth
-from ductor_bot.config import CLAUDE_MODELS_ORDERED, get_gemini_models, update_config_file_async
+from ductor_bot.config import (
+    ANTIGRAVITY_MODELS_ORDERED,
+    CLAUDE_MODELS_ORDERED,
+    get_gemini_models,
+    update_config_file_async,
+)
 from ductor_bot.i18n import t
 from ductor_bot.multiagent.registry import update_agent_fields
 from ductor_bot.orchestrator.selectors.models import Button, ButtonGrid, SelectorResponse
@@ -204,6 +209,8 @@ async def model_selector_start(
         buttons.append(Button(text="CODEX", callback_data="ms:p:codex"))
     if "gemini" in authed:
         buttons.append(Button(text="GEMINI", callback_data="ms:p:gemini"))
+    if "antigravity" in authed:
+        buttons.append(Button(text="ANTIGRAVITY", callback_data="ms:p:antigravity"))
 
     keyboard = ButtonGrid(rows=[buttons])
     return SelectorResponse(text=f"{header}\n\n{t('model.pick_provider')}", buttons=keyboard)
@@ -404,6 +411,14 @@ async def _build_model_step(
         keyboard = ButtonGrid(rows=gemini_rows)
         return SelectorResponse(text=f"{header}\n\n{t('model.select_gemini')}", buttons=keyboard)
 
+    if provider == "antigravity":
+        antigravity_rows = _chunk_buttons(list(ANTIGRAVITY_MODELS_ORDERED), columns=1)
+        antigravity_rows.append([Button(text=t("model.btn_back"), callback_data="ms:b:root")])
+        keyboard = ButtonGrid(rows=antigravity_rows)
+        return SelectorResponse(
+            text=f"{header}\n\n{t('model.select_antigravity')}", buttons=keyboard
+        )
+
     # Use cache instead of live discovery
     codex_models = codex_cache.models if codex_cache else []
     if not codex_models:
@@ -429,10 +444,10 @@ async def _handle_model_selected(
     model_id: str,
     codex_cache: CodexModelCache | None = None,
 ) -> SelectorResponse:
-    """Handle a model button press. Claude/Gemini: switch immediately. Codex: show reasoning."""
+    """Handle a model button press. Codex shows reasoning; other providers switch directly."""
     provider = orch.models.provider_for(model_id)
 
-    if provider in ("claude", "gemini"):
+    if provider in ("claude", "gemini", "antigravity"):
         result = await switch_model(orch, key, model_id)
         return SelectorResponse(text=result)
 
