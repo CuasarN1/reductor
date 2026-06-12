@@ -377,6 +377,57 @@ class TestSendStreaming:
         # Should have stopped early due to abort
         assert len(events) <= 1
 
+    async def test_streaming_topic_abort(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        reg = ProcessRegistry()
+        cli = _make_cli(monkeypatch, process_registry=reg, chat_id=99, topic_id=42)
+
+        lines = [
+            json.dumps({"type": "message", "role": "model", "content": "First"}),
+            json.dumps({"type": "message", "role": "model", "content": "Second"}),
+        ]
+        proc = _make_streaming_process(lines)
+
+        # Topic-scoped /stop marks (chat_id, topic_id); set directly because
+        # kill_by_chat_topic only marks when live processes are registered.
+        reg._aborted_topics.add((99, 42))
+
+        with patch(
+            "ductor_bot.cli.gemini_provider.asyncio.create_subprocess_exec", return_value=proc
+        ):
+            events = [event async for event in cli.send_streaming("Hi")]
+
+        # Should have stopped early due to the topic abort
+        assert len(events) <= 1
+
+    async def test_streaming_other_topic_abort_keeps_stream(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        reg = ProcessRegistry()
+        cli = _make_cli(monkeypatch, process_registry=reg, chat_id=99, topic_id=42)
+
+        lines = [
+            json.dumps({"type": "message", "role": "model", "content": "Hello"}),
+            json.dumps(
+                {
+                    "type": "result",
+                    "result": "Done",
+                    "stats": {"input_tokens": 10, "output_tokens": 5},
+                }
+            ),
+        ]
+        proc = _make_streaming_process(lines)
+
+        # A /stop in another topic must not abort this topic's stream
+        reg._aborted_topics.add((99, 7))
+
+        with patch(
+            "ductor_bot.cli.gemini_provider.asyncio.create_subprocess_exec", return_value=proc
+        ):
+            events = [event async for event in cli.send_streaming("Hi")]
+
+        result_events = [e for e in events if isinstance(e, ResultEvent)]
+        assert len(result_events) == 1
+
     async def test_streaming_nonzero_without_result_emits_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -221,7 +221,9 @@ class CLIService:
                 timeout_seconds=request.timeout_seconds,
                 timeout_controller=request.timeout_controller,
             ):
-                if self._process_registry.was_aborted(request.chat_id):
+                if self._process_registry.was_aborted(
+                    request.chat_id
+                ) or self._process_registry.was_aborted_topic(request.chat_id, request.topic_id):
                     logger.info("Streaming aborted mid-stream chat=%d", request.chat_id)
                     break
                 text, result = await callbacks.dispatch(event)
@@ -283,7 +285,9 @@ class CLIService:
         init_session_id: str | None = None,
     ) -> AgentResponse:
         """Handle failed or incomplete streaming: use accumulated text or retry."""
-        was_aborted = self._process_registry.was_aborted(request.chat_id)
+        was_aborted = self._process_registry.was_aborted(
+            request.chat_id
+        ) or self._process_registry.was_aborted_topic(request.chat_id, request.topic_id)
         logger.info(
             "Stream fallback: aborted=%s accumulated=%d init_sid=%s",
             was_aborted,

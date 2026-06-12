@@ -327,6 +327,7 @@ class Orchestrator:
 
     async def _handle_message_impl(self, dispatch: _MessageDispatch) -> OrchestratorResult:
         self._process_registry.clear_abort(dispatch.key.chat_id)
+        self._process_registry.clear_topic_abort(dispatch.key.chat_id, dispatch.key.topic_id)
         logger.info("Message received text=%s", dispatch.cmd[:80])
 
         patterns = detect_suspicious_patterns(dispatch.text)
@@ -482,8 +483,22 @@ class Orchestrator:
         logger.info("Active provider session reset provider=%s model=%s", provider, model)
         return provider
 
-    async def abort(self, chat_id: int) -> int:
-        """Kill all active CLI processes and background tasks for chat_id."""
+    async def abort(self, chat_id: int, topic_id: int | None = None) -> int:
+        """Kill active CLI processes for *chat_id* (optionally scoped to *topic_id*).
+
+        When ``topic_id`` is provided (``/stop`` from a specific topic),
+        only the foreground CLI processes registered under that
+        ``(chat_id, topic_id)`` pair are killed. Background tasks and
+        named sessions are left alone — they are not topic-tagged in
+        the current model and have their own management surfaces
+        (``/tasks``, ``/sessions``) so /stop should not double up.
+
+        When ``topic_id`` is ``None`` (legacy callers / ``/stop_all``)
+        the chat-wide sweep runs as before: every process for the chat
+        plus every background task and named session.
+        """
+        if topic_id is not None:
+            return await self._process_registry.kill_by_chat_topic(chat_id, topic_id)
         killed = await self._process_registry.kill_all(chat_id)
         if self._observers.background:
             killed += await self._observers.background.cancel_all(chat_id)

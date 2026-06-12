@@ -7,8 +7,9 @@ import contextlib
 import json
 import logging
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -268,7 +269,7 @@ class GeminiCLI(BaseCLI):
                 stderr_bytes=stderr_bytes,
                 state=state,
             )
-            was_aborted = bool(reg and reg.was_aborted(self._config.chat_id))
+            was_aborted = _stream_aborted(reg, self._config.chat_id, self._config.topic_id)
             if final_event is not None and not timed_out and not was_aborted:
                 yield final_event
         finally:
@@ -287,14 +288,18 @@ class GeminiCLI(BaseCLI):
             msg = "Gemini subprocess created without stdout pipe"
             raise RuntimeError(msg)
 
-        reg = self._config.process_registry
+        is_aborted = partial(
+            _stream_aborted,
+            self._config.process_registry,
+            self._config.chat_id,
+            self._config.topic_id,
+        )
         if timeout_controller is None:
             async for event in _stream_events_plain(
                 process,
                 state,
                 timeout_seconds=timeout_seconds or _DEFAULT_TIMEOUT,
-                process_registry=reg,
-                chat_id=self._config.chat_id,
+                is_aborted=is_aborted,
             ):
                 yield event
             return
@@ -303,8 +308,7 @@ class GeminiCLI(BaseCLI):
             process,
             state,
             timeout_controller=timeout_controller,
-            process_registry=reg,
-            chat_id=self._config.chat_id,
+            is_aborted=is_aborted,
         ):
             yield event
 
@@ -435,19 +439,31 @@ async def _communicate_with_timeout(
         return await communicate_coro
 
 
+def _stream_aborted(
+    process_registry: ProcessRegistry | None, chat_id: int, topic_id: int | None
+) -> bool:
+    """Return True when the chat or its forum topic was stopped by the user."""
+    return bool(
+        process_registry
+        and (
+            process_registry.was_aborted(chat_id)
+            or process_registry.was_aborted_topic(chat_id, topic_id)
+        )
+    )
+
+
 async def _stream_events_plain(
     process: asyncio.subprocess.Process,
     state: _GeminiStreamState,
     *,
     timeout_seconds: float,
-    process_registry: ProcessRegistry | None,
-    chat_id: int,
+    is_aborted: Callable[[], bool],
 ) -> AsyncGenerator[StreamEvent, None]:
     """Read stream output with a fixed timeout (legacy behavior)."""
     assert process.stdout is not None
     async with asyncio.timeout(timeout_seconds):
         while True:
-            if process_registry and process_registry.was_aborted(chat_id):
+            if is_aborted():
                 logger.info("Gemini streaming aborted by user")
                 return
 
@@ -470,8 +486,7 @@ async def _stream_events_with_controller(
     state: _GeminiStreamState,
     *,
     timeout_controller: TimeoutController,
-    process_registry: ProcessRegistry | None,
-    chat_id: int,
+    is_aborted: Callable[[], bool],
 ) -> AsyncGenerator[StreamEvent, None]:
     """Read stream output with managed timeout extensions + warnings."""
     assert process.stdout is not None
@@ -483,7 +498,7 @@ async def _stream_events_with_controller(
             try:
                 async with asyncio.timeout(timeout_secs):
                     while True:
-                        if process_registry and process_registry.was_aborted(chat_id):
+                        if is_aborted():
                             logger.info("Gemini streaming aborted by user")
                             return
 
