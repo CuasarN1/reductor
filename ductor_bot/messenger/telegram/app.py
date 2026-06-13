@@ -41,12 +41,13 @@ from ductor_bot.messenger.telegram.file_browser import (
 )
 from ductor_bot.messenger.telegram.formatting import markdown_to_telegram_html
 from ductor_bot.messenger.telegram.handlers import (
-    build_reply_context,
+    build_reply_prompt,
     handle_abort,
     handle_abort_all,
     handle_command,
     handle_interrupt,
     handle_new_session,
+    prepend_reply_to_media,
     strip_mention,
 )
 from ductor_bot.messenger.telegram.media import (
@@ -1404,16 +1405,16 @@ class TelegramBot:
 
         if has_media(message):
             paths = self._orch.paths
-            return await resolve_media_text(
+            media_prompt = await resolve_media_text(
                 self._bot, message, paths.telegram_files_dir, paths.workspace
             )
+            if media_prompt is None:
+                return None
+            return prepend_reply_to_media(message, media_prompt)
         if not message.text:
             return None
         text = strip_mention(message.text, self._bot_username)
-        quoted = build_reply_context(message)
-        if quoted:
-            return f"{quoted}\n\n{text}"
-        return text
+        return build_reply_prompt(message, text)
 
     async def _handle_streaming(
         self, message: Message, key: SessionKey, text: str, *, thread_id: int | None = None

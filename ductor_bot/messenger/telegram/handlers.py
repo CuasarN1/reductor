@@ -206,14 +206,59 @@ def strip_mention(text: str, bot_username: str | None) -> str:
     return text
 
 
-def build_reply_context(message: Message) -> str | None:
-    """Return the cited text of a Telegram reply as a Markdown quote block.
+def build_reply_prompt(message: Message, user_text: str) -> str:
+    """Prefix *user_text* with the cited message of a Telegram reply (#135).
+
+    When the user replies to a message, the quoted text is prepended with
+    explicit labels so the agent can tell the citation from the new message::
+
+        The user is replying to this quoted message:
+        > <quoted text>
+
+        The user's message:
+        <user_text>
 
     Prefers the user-selected quote fragment (Bot API 7.0+) over the full
-    replied-to message body, so "expand on point 2" carries the quoted text
-    into the agent prompt (#135). Returns ``None`` when the message is not a
+    replied-to body. Returns *user_text* unchanged when the message is not a
     reply or the cited message carries no text — e.g. forum-topic service
     messages or media-only replies without a caption.
+    """
+    cited = _cited_reply_text(message)
+    if cited is None:
+        return user_text
+    quoted = "\n".join(f"> {line}" for line in cited.splitlines())
+    return (
+        f"The user is replying to this quoted message:\n{quoted}\n\n"
+        f"The user's message:\n{user_text}"
+    )
+
+
+def prepend_reply_to_media(message: Message, media_prompt: str) -> str:
+    """Prefix a media prompt with the cited reply message (#135).
+
+    For non-text replies (voice/photo/video/...), the user's actual reply is the
+    attachment, so the quoted text plus an explicit attachment-type note is
+    prepended ahead of the ``[INCOMING FILE]`` block — e.g. a voicemail reply to
+    a cron brief. Returns *media_prompt* unchanged when the message is not a
+    reply or the cited message has no text (forum-topic service messages).
+    """
+    cited = _cited_reply_text(message)
+    if cited is None:
+        return media_prompt
+    quoted = "\n".join(f"> {line}" for line in cited.splitlines())
+    label = _reply_attachment_label(message)
+    return (
+        f"The user is replying to this quoted message:\n{quoted}\n\n"
+        f"Their reply is {label} (the attached file below).\n\n{media_prompt}"
+    )
+
+
+def _cited_reply_text(message: Message) -> str | None:
+    """Return the cited text of a Telegram reply, or ``None`` when absent.
+
+    Prefers the user-selected quote fragment over the full replied-to body
+    (text or caption); returns ``None`` for non-replies and text-less cited
+    messages (forum-topic service messages, media-only replies).
     """
     quote = message.quote
     cited: str | None
@@ -224,4 +269,18 @@ def build_reply_context(message: Message) -> str | None:
         cited = (replied.text or replied.caption) if replied is not None else None
     if not cited or not cited.strip():
         return None
-    return "\n".join(f"> {line}" for line in cited.strip().splitlines())
+    return cited.strip()
+
+
+def _reply_attachment_label(message: Message) -> str:
+    """Human-readable label for the attachment type, matching ``_resolve_media``."""
+    labels = (
+        (message.photo, "an image"),
+        (message.document, "a document"),
+        (message.voice, "a voice message"),
+        (message.audio, "an audio file"),
+        (message.video, "a video"),
+        (message.video_note, "a video note"),
+        (message.sticker, "a sticker"),
+    )
+    return next((label for value, label in labels if value), "a file")
