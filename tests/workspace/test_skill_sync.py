@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import shutil
 from pathlib import Path
 from unittest.mock import patch
@@ -15,12 +16,14 @@ from ductor_bot.workspace.skill_sync import (
     _MANAGED_MARKER,
     _clean_broken_links,
     _clean_invalid_workspace_skill_links,
+    _cli_skill_dirs,
     _discover_skills,
     _ensure_copy,
     _ensure_link,
     _has_valid_skill_frontmatter,
     _is_managed_copy,
     _is_under,
+    _load_skill_sync_config,
     _resolve_canonical,
     cleanup_ductor_links,
     sync_bundled_skills,
@@ -928,3 +931,62 @@ def test_bundled_docker_replaces_old_symlink(tmp_path: Path) -> None:
     target = paths.skills_dir / "sk"
     assert not target.is_symlink()
     assert _is_managed_copy(target)
+
+
+# ---------------------------------------------------------------------------
+# Group: skill sync toggle config (#141)
+# ---------------------------------------------------------------------------
+
+_ALL_PROVIDERS = frozenset({"claude", "codex", "gemini"})
+
+
+def test_load_skill_sync_config_missing_file(tmp_path: Path) -> None:
+    enabled, providers = _load_skill_sync_config(tmp_path / "absent.json")
+    assert enabled is True
+    assert providers == _ALL_PROVIDERS
+
+
+def test_load_skill_sync_config_without_block(tmp_path: Path) -> None:
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"provider": "claude"}))
+    enabled, providers = _load_skill_sync_config(cfg)
+    assert enabled is True
+    assert providers == _ALL_PROVIDERS
+
+
+def test_load_skill_sync_config_global_disable(tmp_path: Path) -> None:
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"skills": {"sync_enabled": False}}))
+    enabled, _providers = _load_skill_sync_config(cfg)
+    assert enabled is False
+
+
+def test_load_skill_sync_config_per_provider_opt_out(tmp_path: Path) -> None:
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"skills": {"sync": {"codex": False}}}))
+    enabled, providers = _load_skill_sync_config(cfg)
+    assert enabled is True
+    assert providers == frozenset({"claude", "gemini"})
+
+
+def test_cli_skill_dirs_filters_disabled_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_home = tmp_path / "home"
+    for name in (".claude", ".codex", ".gemini"):
+        (fake_home / name).mkdir(parents=True)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    with patch("ductor_bot.workspace.skill_sync.Path.home", return_value=fake_home):
+        assert set(_cli_skill_dirs(None)) == {"claude", "codex", "gemini"}
+        assert set(_cli_skill_dirs(frozenset({"claude", "gemini"}))) == {"claude", "gemini"}
+        assert _cli_skill_dirs(frozenset()) == {}
+
+
+def test_sync_skills_skipped_when_globally_disabled(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    paths.skills_dir.mkdir(parents=True, exist_ok=True)
+    paths.config_path.parent.mkdir(parents=True, exist_ok=True)
+    paths.config_path.write_text(json.dumps({"skills": {"sync_enabled": False}}))
+    with patch("ductor_bot.workspace.skill_sync._cli_skill_dirs") as mock_dirs:
+        sync_skills(paths)
+    mock_dirs.assert_not_called()

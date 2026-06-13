@@ -398,6 +398,26 @@ async def update_config_file_async(config_path: Path, **updates: object) -> None
     await asyncio.to_thread(update_config_file, config_path, **updates)
 
 
+class SkillSyncProviders(BaseModel):
+    """Per-provider cross-tool skill sync toggles (#141)."""
+
+    claude: bool = True
+    codex: bool = True
+    gemini: bool = True
+
+
+class SkillsConfig(BaseModel):
+    """Cross-tool skill sync configuration.
+
+    ``sync_enabled`` is the global switch; ``sync`` allows opting out of
+    individual provider skill directories (e.g. ``~/.codex/skills``) while
+    keeping the shared workflow for the others.
+    """
+
+    sync_enabled: bool = True
+    sync: SkillSyncProviders = Field(default_factory=SkillSyncProviders)
+
+
 class AgentConfig(BaseModel):
     """Top-level configuration loaded from config.json."""
 
@@ -433,6 +453,7 @@ class AgentConfig(BaseModel):
     scene: SceneConfig = Field(default_factory=SceneConfig)
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
     user_timezone: str = ""
     language: str = "en"
     update_check: bool = True
