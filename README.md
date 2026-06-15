@@ -23,6 +23,9 @@
 
 ---
 
+> [!IMPORTANT]
+> **Claude `-p` billing changed (effective 2026-06-15):** Anthropic moved Claude Code headless mode (`claude -p`) out of the Pro/Max/Team/Enterprise subscription pool. ductor's Claude provider runs headless, so on a Claude **subscription** these calls now count as extra/paid usage at standard API rates (the interactive TUI stays in the subscription). The `-p` flag still works; only billing changed. A clean console-based approach is being evaluated. In the meantime you can use **Codex** or **AGY (Antigravity)** as the provider — those are unaffected. Details and status: [#154](https://github.com/PleasePrompto/ductor/issues/154).
+
 If you want to control Claude Code, Google's Gemini CLI, OpenAI's Codex CLI, or Antigravity CLI via Telegram or Matrix, build automations, or manage multiple agents easily — ductor is the right tool for you. The messaging layer is modular: Telegram and Matrix ship today, and new transports plug into the same transport-agnostic core.
 
 ductor runs on your machine and sends simple console commands as if you were typing them yourself, so you can use your active subscriptions (Claude Max, Google AI Ultra, etc.) directly. No API proxying, no SDK patching, no spoofed headers. Just the official CLIs, executed as subprocesses, with all state kept in plain JSON and Markdown under `~/.ductor/`.
