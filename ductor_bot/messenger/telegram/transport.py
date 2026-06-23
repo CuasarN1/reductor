@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from ductor_bot.bus.cron_sanitize import sanitize_cron_result_text
 from ductor_bot.bus.envelope import Envelope, Origin
+from ductor_bot.messenger.telegram.outbox import drain_once, enqueue_text, outbox_dir
 from ductor_bot.messenger.telegram.sender import SendRichOpts, send_rich
 from ductor_bot.text.response_format import SEP, fmt
 
@@ -68,6 +69,32 @@ class TelegramTransport:
             thread_id=envelope.topic_id or envelope.thread_id,
         )
 
+    async def _send_queued(
+        self,
+        chat_id: int,
+        text: str,
+        opts: SendRichOpts | None = None,
+    ) -> None:
+        o = opts or SendRichOpts()
+        if o.reply_markup is not None:
+            await send_rich(self._bot.bot_instance, chat_id, text, o)
+            return
+        root = outbox_dir(self._bot._orch.paths.ductor_home)
+        delivery_id = enqueue_text(
+            root,
+            chat_id=chat_id,
+            text=text,
+            reply_to_message_id=o.reply_to_message_id,
+            thread_id=o.thread_id,
+            allowed_roots=o.allowed_roots,
+        )
+        if delivery_id is not None:
+            await drain_once(self._bot.bot_instance, root)
+
+    async def _broadcast_queued(self, text: str, opts: SendRichOpts | None = None) -> None:
+        for uid in self._bot._config.allowed_user_ids:
+            await self._send_queued(uid, text, opts)
+
     # -- Origin handlers (unicast) -----------------------------------------
 
     async def _deliver_background(self, env: Envelope) -> None:
@@ -88,7 +115,7 @@ class TelegramTransport:
             await send_rich(self._bot.bot_instance, env.chat_id, cleaned, opts)
         else:
             text = self._format_stateless(env, elapsed)
-            await send_rich(self._bot.bot_instance, env.chat_id, text, self._opts(env))
+            await self._send_queued(env.chat_id, text, self._opts(env))
 
     @staticmethod
     def _format_named_session(env: Envelope, elapsed: str) -> str:
@@ -161,22 +188,17 @@ class TelegramTransport:
                 f"Error: {env.metadata.get('error', 'unknown')}\n"
                 f"Request: _{env.prompt_preview}_"
             )
-            await send_rich(self._bot.bot_instance, env.chat_id, error_text, opts)
+            await self._send_queued(env.chat_id, error_text, opts)
             return
 
         # Provider switch notice (before result)
         notice = env.metadata.get("provider_switch_notice", "")
         if notice:
-            await send_rich(
-                self._bot.bot_instance,
-                env.chat_id,
-                f"**Provider Switch Detected**\n\n{notice}",
-                opts,
-            )
+            await self._send_queued(env.chat_id, f"**Provider Switch Detected**\n\n{notice}", opts)
 
         # Result text (filled by bus injection)
         if env.result_text:
-            await send_rich(self._bot.bot_instance, env.chat_id, env.result_text, opts)
+            await self._send_queued(env.chat_id, env.result_text, opts)
 
     async def _deliver_task_result(self, env: Envelope) -> None:
         """Deliver task result notification + injected response."""
@@ -196,11 +218,11 @@ class TelegramTransport:
             note = f"**Task `{name}` failed**\nReason: {env.metadata.get('error', 'unknown')}"
 
         if note:
-            await send_rich(self._bot.bot_instance, env.chat_id, note, opts)
+            await self._send_queued(env.chat_id, note, opts)
 
         # 2. Injected response (filled by bus injection for done/failed)
         if env.needs_injection and env.result_text:
-            await send_rich(self._bot.bot_instance, env.chat_id, env.result_text, opts)
+            await self._send_queued(env.chat_id, env.result_text, opts)
 
     async def _deliver_task_question(self, env: Envelope) -> None:
         """Deliver task question notification + injected agent response."""
@@ -209,23 +231,23 @@ class TelegramTransport:
 
         # 1. Notification
         note = f"**Task `{task_id}` has a question:**\n{env.prompt}"
-        await send_rich(self._bot.bot_instance, env.chat_id, note, opts)
+        await self._send_queued(env.chat_id, note, opts)
 
         # 2. Agent response (filled by bus injection)
         if env.result_text:
-            await send_rich(self._bot.bot_instance, env.chat_id, env.result_text, opts)
+            await self._send_queued(env.chat_id, env.result_text, opts)
 
     async def _deliver_webhook_wake(self, env: Envelope) -> None:
         """Deliver webhook wake result."""
         if env.result_text:
-            await send_rich(self._bot.bot_instance, env.chat_id, env.result_text, self._opts(env))
+            await self._send_queued(env.chat_id, env.result_text, self._opts(env))
 
     async def _deliver_cron(self, env: Envelope) -> None:
         """Deliver cron result to a specific chat/topic (unicast).
 
         Falls back to the main agent when delivery fails.
         """
-        from aiogram.exceptions import TelegramAPIError
+        from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
 
         title = env.metadata.get("title", "?")
         clean_result = sanitize_cron_result_text(env.result_text)
@@ -243,9 +265,14 @@ class TelegramTransport:
         opts = SendRichOpts(
             allowed_roots=self._roots(),
             thread_id=env.topic_id,
+            raise_network_errors=True,
         )
         try:
             await send_rich(self._bot.bot_instance, env.chat_id, text, opts)
+        except TelegramNetworkError:
+            logger.warning("Cron '%s' delivery hit network error; queued for retry", title)
+            opts.raise_network_errors = False
+            await self._send_queued(env.chat_id, text, opts)
         except TelegramAPIError:
             logger.warning(
                 "Cron '%s' delivery failed for chat %d, falling back to main agent",
@@ -261,8 +288,7 @@ class TelegramTransport:
                 f"---\n{clean_result or env.status}"
             )
             fallback_id = self._bot._config.allowed_user_ids[0]
-            await send_rich(
-                self._bot.bot_instance,
+            await self._send_queued(
                 fallback_id,
                 fallback_text,
                 SendRichOpts(allowed_roots=self._roots()),
@@ -283,7 +309,7 @@ class TelegramTransport:
             if clean_result
             else f"**TASK: {title}**\n\n_{env.status}_"
         )
-        await self._bot.broadcast(text, SendRichOpts(allowed_roots=self._roots()))
+        await self._broadcast_queued(text, SendRichOpts(allowed_roots=self._roots()))
 
     async def _broadcast_webhook_cron(self, env: Envelope) -> None:
         title = env.metadata.get("hook_title", "?")
@@ -291,7 +317,7 @@ class TelegramTransport:
             text = f"**WEBHOOK (CRON TASK): {title}**\n\n{env.result_text}"
         else:
             text = f"**WEBHOOK (CRON TASK): {title}**\n\n_{env.status}_"
-        await self._bot.broadcast(text, SendRichOpts(allowed_roots=self._roots()))
+        await self._broadcast_queued(text, SendRichOpts(allowed_roots=self._roots()))
 
 
 # ---------------------------------------------------------------------------

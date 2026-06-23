@@ -36,6 +36,7 @@ class SendRichOpts(BaseSendOpts):
     reply_to_message_id: int | None = None
     reply_markup: InlineKeyboardMarkup | None = None
     thread_id: int | None = None
+    raise_network_errors: bool = False
 
 
 logger = logging.getLogger(__name__)
@@ -124,13 +125,14 @@ async def send_files_from_text(
         )
 
 
-async def _send_text_chunks(
+async def _send_text_chunks(  # noqa: PLR0913
     bot: Bot,
     chat_id: int,
     clean_text: str,
     *,
     reply_to_message_id: int | None = None,
     thread_id: int | None = None,
+    raise_network_errors: bool = False,
 ) -> Message | None:
     """Send *clean_text* as HTML chunks, falling back to plain text on error."""
     last_msg: Message | None = None
@@ -157,6 +159,8 @@ async def _send_text_chunks(
                     message_thread_id=thread_id,
                 )
         except TelegramNetworkError:
+            if raise_network_errors:
+                raise
             logger.debug("Network error sending message (likely shutdown), skipping")
             return last_msg
         except TelegramBadRequest:
@@ -204,6 +208,7 @@ async def send_rich(
             clean_text,
             reply_to_message_id=o.reply_to_message_id,
             thread_id=o.thread_id,
+            raise_network_errors=o.raise_network_errors,
         )
 
     if button_markup is not None and last_msg is not None:
@@ -214,6 +219,8 @@ async def send_rich(
                 reply_markup=button_markup,
             )
         except TelegramNetworkError:
+            if o.raise_network_errors:
+                raise
             logger.debug("Network error attaching keyboard (likely shutdown)")
         except TelegramBadRequest:
             logger.warning("Failed to attach button keyboard in send_rich")

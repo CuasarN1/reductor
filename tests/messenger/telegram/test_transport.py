@@ -32,6 +32,7 @@ def _make_transport() -> tuple[TelegramTransport, MagicMock, AsyncMock]:
     bot.file_roots.return_value = [Path("/tmp/roots")]
     bot._orch.paths = MagicMock()
     bot._orch.named_sessions.update_after_response = MagicMock()
+    bot._config.allowed_user_ids = [101]
     bot.broadcast = AsyncMock()
     transport = TelegramTransport(bot)
     send_mock = AsyncMock()
@@ -76,7 +77,7 @@ class TestCronSanitisation:
 
 class TestCronBroadcast:
     async def test_broadcasts_with_result_text(self) -> None:
-        transport, bot, _ = _make_transport()
+        transport, _bot, _ = _make_transport()
         env = _env(
             origin=Origin.CRON,
             result_text="All good",
@@ -84,16 +85,16 @@ class TestCronBroadcast:
             metadata={"title": "Backup"},
         )
 
-        with patch("ductor_bot.messenger.telegram.transport.send_rich", new_callable=AsyncMock):
+        with patch.object(transport, "_send_queued", new_callable=AsyncMock) as mock_send:
             await transport.deliver_broadcast(env)
 
-        bot.broadcast.assert_awaited_once()
-        text = bot.broadcast.call_args[0][0]
+        mock_send.assert_awaited_once()
+        text = mock_send.await_args.args[1]
         assert "**TASK: Backup**" in text
         assert "All good" in text
 
     async def test_broadcasts_status_only_when_no_text(self) -> None:
-        transport, bot, _ = _make_transport()
+        transport, _bot, _ = _make_transport()
         env = _env(
             origin=Origin.CRON,
             result_text="",
@@ -101,14 +102,16 @@ class TestCronBroadcast:
             metadata={"title": "Deploy"},
         )
 
-        await transport.deliver_broadcast(env)
+        with patch.object(transport, "_send_queued", new_callable=AsyncMock) as mock_send:
+            await transport.deliver_broadcast(env)
 
-        text = bot.broadcast.call_args[0][0]
+        mock_send.assert_awaited_once()
+        text = mock_send.await_args.args[1]
         assert "**TASK: Deploy**" in text
         assert "_failed_" in text
 
     async def test_skips_ack_only_success(self) -> None:
-        transport, bot, _ = _make_transport()
+        transport, _bot, _ = _make_transport()
         env = _env(
             origin=Origin.CRON,
             result_text='Message sent successfully. "Hi" delivered to Telegram (id 5).',
@@ -116,9 +119,10 @@ class TestCronBroadcast:
             metadata={"title": "Greet"},
         )
 
-        await transport.deliver_broadcast(env)
+        with patch.object(transport, "_send_queued", new_callable=AsyncMock) as mock_send:
+            await transport.deliver_broadcast(env)
 
-        bot.broadcast.assert_not_awaited()
+        mock_send.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +156,7 @@ class TestHeartbeatDelivery:
 
 class TestWebhookCronBroadcast:
     async def test_broadcasts_with_text(self) -> None:
-        transport, bot, _ = _make_transport()
+        transport, _bot, _ = _make_transport()
         env = _env(
             origin=Origin.WEBHOOK_CRON,
             result_text="Deployed v3",
@@ -160,15 +164,17 @@ class TestWebhookCronBroadcast:
             metadata={"hook_title": "Deploy"},
         )
 
-        await transport.deliver_broadcast(env)
+        with patch.object(transport, "_send_queued", new_callable=AsyncMock) as mock_send:
+            await transport.deliver_broadcast(env)
 
-        text = bot.broadcast.call_args[0][0]
+        mock_send.assert_awaited_once()
+        text = mock_send.await_args.args[1]
         assert "WEBHOOK (CRON TASK)" in text
         assert "Deploy" in text
         assert "Deployed v3" in text
 
     async def test_broadcasts_status_when_no_text(self) -> None:
-        transport, bot, _ = _make_transport()
+        transport, _bot, _ = _make_transport()
         env = _env(
             origin=Origin.WEBHOOK_CRON,
             result_text="",
@@ -176,9 +182,11 @@ class TestWebhookCronBroadcast:
             metadata={"hook_title": "Hook"},
         )
 
-        await transport.deliver_broadcast(env)
+        with patch.object(transport, "_send_queued", new_callable=AsyncMock) as mock_send:
+            await transport.deliver_broadcast(env)
 
-        text = bot.broadcast.call_args[0][0]
+        mock_send.assert_awaited_once()
+        text = mock_send.await_args.args[1]
         assert "_error_" in text
 
 
@@ -259,12 +267,10 @@ class TestBackgroundDelivery:
             metadata={"task_id": "abc123"},
         )
 
-        with patch(
-            "ductor_bot.messenger.telegram.transport.send_rich", new_callable=AsyncMock
-        ) as mock_send:
+        with patch.object(transport, "_send_queued", new_callable=AsyncMock) as mock_send:
             await transport.deliver(env)
 
-        text = mock_send.call_args[0][2]
+        text = mock_send.await_args.args[1]
         assert "Background Task Complete" in text
         assert "Done" in text
 
@@ -280,12 +286,10 @@ class TestBackgroundDelivery:
             metadata={"task_id": "xyz"},
         )
 
-        with patch(
-            "ductor_bot.messenger.telegram.transport.send_rich", new_callable=AsyncMock
-        ) as mock_send:
+        with patch.object(transport, "_send_queued", new_callable=AsyncMock) as mock_send:
             await transport.deliver(env)
 
-        text = mock_send.call_args[0][2]
+        text = mock_send.await_args.args[1]
         assert "Background Task Failed" in text
         assert "xyz" in text
 
@@ -298,12 +302,10 @@ class TestBackgroundDelivery:
             metadata={"task_id": "t1"},
         )
 
-        with patch(
-            "ductor_bot.messenger.telegram.transport.send_rich", new_callable=AsyncMock
-        ) as mock_send:
+        with patch.object(transport, "_send_queued", new_callable=AsyncMock) as mock_send:
             await transport.deliver(env)
 
-        text = mock_send.call_args[0][2]
+        text = mock_send.await_args.args[1]
         assert "Background Task Cancelled" in text
         assert "t1" in text
 
@@ -323,13 +325,11 @@ class TestInteragentDelivery:
             metadata={"recipient": "sub-agent", "error": "timeout"},
         )
 
-        with patch(
-            "ductor_bot.messenger.telegram.transport.send_rich", new_callable=AsyncMock
-        ) as mock_send:
+        with patch.object(transport, "_send_queued", new_callable=AsyncMock) as mock_send:
             await transport.deliver(env)
 
         mock_send.assert_awaited_once()
-        text = mock_send.call_args[0][2]
+        text = mock_send.await_args.args[1]
         assert "Inter-Agent Request Failed" in text
         assert "sub-agent" in text
         assert "timeout" in text
@@ -342,15 +342,13 @@ class TestInteragentDelivery:
             metadata={"provider_switch_notice": "Switched to gemini"},
         )
 
-        with patch(
-            "ductor_bot.messenger.telegram.transport.send_rich", new_callable=AsyncMock
-        ) as mock_send:
+        with patch.object(transport, "_send_queued", new_callable=AsyncMock) as mock_send:
             await transport.deliver(env)
 
         assert mock_send.await_count == 2
-        first_text = mock_send.call_args_list[0][0][2]
+        first_text = mock_send.await_args_list[0].args[1]
         assert "Provider Switch Detected" in first_text
-        second_text = mock_send.call_args_list[1][0][2]
+        second_text = mock_send.await_args_list[1].args[1]
         assert second_text == "Response text"
 
 
@@ -373,13 +371,11 @@ class TestTaskResultDelivery:
             metadata={"name": "research", "task_id": "t1"},
         )
 
-        with patch(
-            "ductor_bot.messenger.telegram.transport.send_rich", new_callable=AsyncMock
-        ) as mock_send:
+        with patch.object(transport, "_send_queued", new_callable=AsyncMock) as mock_send:
             await transport.deliver(env)
 
         assert mock_send.await_count == 2
-        note = mock_send.call_args_list[0][0][2]
+        note = mock_send.await_args_list[0].args[1]
         assert "research" in note
         assert "completed" in note
         assert "claude/opus" in note
@@ -393,12 +389,10 @@ class TestTaskResultDelivery:
             metadata={"name": "build", "error": "OOM"},
         )
 
-        with patch(
-            "ductor_bot.messenger.telegram.transport.send_rich", new_callable=AsyncMock
-        ) as mock_send:
+        with patch.object(transport, "_send_queued", new_callable=AsyncMock) as mock_send:
             await transport.deliver(env)
 
-        note = mock_send.call_args_list[0][0][2]
+        note = mock_send.await_args_list[0].args[1]
         assert "failed" in note
         assert "OOM" in note
 
@@ -410,12 +404,10 @@ class TestTaskResultDelivery:
             metadata={"name": "cleanup"},
         )
 
-        with patch(
-            "ductor_bot.messenger.telegram.transport.send_rich", new_callable=AsyncMock
-        ) as mock_send:
+        with patch.object(transport, "_send_queued", new_callable=AsyncMock) as mock_send:
             await transport.deliver(env)
 
-        note = mock_send.call_args_list[0][0][2]
+        note = mock_send.await_args_list[0].args[1]
         assert "cancelled" in note
 
 
@@ -434,16 +426,14 @@ class TestTaskQuestionDelivery:
             metadata={"task_id": "q1"},
         )
 
-        with patch(
-            "ductor_bot.messenger.telegram.transport.send_rich", new_callable=AsyncMock
-        ) as mock_send:
+        with patch.object(transport, "_send_queued", new_callable=AsyncMock) as mock_send:
             await transport.deliver(env)
 
         assert mock_send.await_count == 2
-        question = mock_send.call_args_list[0][0][2]
+        question = mock_send.await_args_list[0].args[1]
         assert "q1" in question
         assert "What encoding?" in question
-        answer = mock_send.call_args_list[1][0][2]
+        answer = mock_send.await_args_list[1].args[1]
         assert answer == "Use UTF-8"
 
 

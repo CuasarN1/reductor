@@ -14,7 +14,7 @@ import logging
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 
 from ductor_bot.messenger.telegram.buttons import extract_buttons
 from ductor_bot.messenger.telegram.formatting import (
@@ -39,6 +39,8 @@ class StreamEditorProtocol(Protocol):
 
     @property
     def has_content(self) -> bool: ...
+    @property
+    def delivery_failed(self) -> bool: ...
     async def append_text(self, text: str) -> None: ...
     async def append_tool(self, tool_name: str) -> None: ...
     async def append_system(self, text: str) -> None: ...
@@ -70,11 +72,17 @@ class StreamEditor:
         self._thread_id = thread_id
         self._messages_sent = 0
         self._last_msg: Message | None = None
+        self._delivery_failed = False
 
     @property
     def has_content(self) -> bool:
         """True if at least one message has been sent."""
         return self._messages_sent > 0
+
+    @property
+    def delivery_failed(self) -> bool:
+        """True if a Telegram network failure occurred while sending."""
+        return self._delivery_failed
 
     async def append_text(self, text: str) -> None:
         """Format chunk as HTML and send as new message."""
@@ -109,6 +117,9 @@ class StreamEditor:
                 message_id=self._last_msg.message_id,
                 reply_markup=markup,
             )
+        except TelegramNetworkError:
+            self._delivery_failed = True
+            logger.warning("Network error attaching button keyboard")
         except TelegramBadRequest:
             logger.warning("Failed to attach button keyboard")
 
@@ -136,6 +147,9 @@ class StreamEditor:
                 )
             self._last_msg = msg
             self._messages_sent += 1
+        except TelegramNetworkError:
+            self._delivery_failed = True
+            logger.warning("Network error sending stream chunk")
         except TelegramBadRequest:
             if parse_mode is not None:
                 logger.warning("HTML send failed, falling back to plain text")

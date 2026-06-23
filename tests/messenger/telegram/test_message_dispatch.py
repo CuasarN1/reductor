@@ -144,7 +144,7 @@ async def test_non_streaming_reacts_on_trigger_message_not_reply_to() -> None:
 
     with (
         patch(
-            "ductor_bot.messenger.telegram.message_dispatch.send_rich",
+            "ductor_bot.messenger.telegram.message_dispatch._enqueue_and_try_drain",
             new_callable=AsyncMock,
         ),
         patch("ductor_bot.messenger.telegram.message_dispatch.TypingContext") as typing_ctx,
@@ -180,6 +180,7 @@ async def test_streaming_reasoning_only_still_sends_final_answer() -> None:
     editor.append_tool = AsyncMock()
     editor.append_system = AsyncMock()
     editor.finalize = AsyncMock()
+    editor.delivery_failed = False
 
     orch = MagicMock()
 
@@ -209,9 +210,9 @@ async def test_streaming_reasoning_only_still_sends_final_answer() -> None:
             return_value=editor,
         ),
         patch(
-            "ductor_bot.messenger.telegram.message_dispatch.send_rich",
+            "ductor_bot.messenger.telegram.message_dispatch._enqueue_and_try_drain",
             new_callable=AsyncMock,
-        ) as send_rich_mock,
+        ) as enqueue_mock,
         patch(
             "ductor_bot.messenger.telegram.message_dispatch.send_files_from_text",
             new_callable=AsyncMock,
@@ -224,8 +225,8 @@ async def test_streaming_reasoning_only_still_sends_final_answer() -> None:
         result = await run_streaming_message(dispatch)
 
     assert result == "Final answer delivered"
-    send_rich_mock.assert_awaited_once()
-    assert send_rich_mock.await_args.args[2] == "Final answer delivered"
+    enqueue_mock.assert_awaited_once()
+    assert enqueue_mock.await_args.args[3] == "Final answer delivered"
     send_files_mock.assert_not_awaited()
 
 
@@ -242,6 +243,7 @@ async def test_streaming_tool_progress_can_be_disabled() -> None:
     editor.append_tool = AsyncMock()
     editor.append_system = AsyncMock()
     editor.finalize = AsyncMock()
+    editor.delivery_failed = False
 
     orch = MagicMock()
 
@@ -267,7 +269,7 @@ async def test_streaming_tool_progress_can_be_disabled() -> None:
             return_value=editor,
         ),
         patch(
-            "ductor_bot.messenger.telegram.message_dispatch.send_rich",
+            "ductor_bot.messenger.telegram.message_dispatch._enqueue_and_try_drain",
             new_callable=AsyncMock,
         ),
         patch(

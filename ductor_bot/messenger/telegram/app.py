@@ -186,12 +186,10 @@ class TelegramBot:
         self._abort_all_callback: Callable[[], Awaitable[int]] | None = None
 
         telegram_proxy_url = os.getenv("DUCTOR_TELEGRAM_PROXY_URL", "").strip()
-        telegram_session = (
-            AiohttpSession(proxy=telegram_proxy_url) if telegram_proxy_url else None
+        telegram_session = AiohttpSession(proxy=telegram_proxy_url) if telegram_proxy_url else None
+        telegram_proxy_ssl_verify = (
+            os.getenv("DUCTOR_TELEGRAM_PROXY_SSL_VERIFY", "true").strip().lower()
         )
-        telegram_proxy_ssl_verify = os.getenv(
-            "DUCTOR_TELEGRAM_PROXY_SSL_VERIFY", "true"
-        ).strip().lower()
         if telegram_session is not None and telegram_proxy_ssl_verify in {
             "0",
             "false",
@@ -218,6 +216,7 @@ class TelegramBot:
         self._update_observer: UpdateObserver | None = None
         self._upgrade_lock = asyncio.Lock()
         self._group_audit_task: asyncio.Task[None] | None = None
+        self._outbox_drain_task: asyncio.Task[None] | None = None
 
         allowed = set(config.allowed_user_ids)
         allowed_groups = set(config.allowed_group_ids)
@@ -394,11 +393,15 @@ class TelegramBot:
                 )
 
     async def _on_startup(self) -> None:
+        from ductor_bot.messenger.telegram.outbox import drain_loop, outbox_dir
         from ductor_bot.messenger.telegram.startup import run_startup
 
         await run_startup(self)
         self._sequential.set_bot_username(self._bot_username)
         self._sequential.set_bot_id(self._bot_id)
+        if self._outbox_drain_task is None or self._outbox_drain_task.done():
+            root = outbox_dir(self._orch.paths.ductor_home)
+            self._outbox_drain_task = asyncio.create_task(drain_loop(self._bot, root))
 
     def _register_handlers(self) -> None:
         r = self._router
@@ -1659,6 +1662,7 @@ class TelegramBot:
     async def shutdown(self) -> None:
         await _cancel_task(self._restart_watcher)
         await _cancel_task(self._group_audit_task)
+        await _cancel_task(self._outbox_drain_task)
         if self._update_observer:
             await self._update_observer.stop()
         if self._orchestrator:

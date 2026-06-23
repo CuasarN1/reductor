@@ -7,11 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from aiogram.exceptions import TelegramNetworkError
+
 from ductor_bot.cli.coalescer import CoalesceConfig, StreamCoalescer
+from ductor_bot.messenger.telegram.outbox import drain_once, enqueue_text, outbox_dir
 from ductor_bot.messenger.telegram.sender import (
-    SendRichOpts,
     send_files_from_text,
-    send_rich,
 )
 from ductor_bot.messenger.telegram.streaming import StreamEditor, create_stream_editor
 from ductor_bot.messenger.telegram.typing import TypingContext
@@ -150,6 +151,29 @@ def _format_reasoning_chunk(text: str) -> str:
     return f"**Thinking**\n\n{normalized}"
 
 
+async def _enqueue_and_try_drain(  # noqa: PLR0913
+    bot: Bot,
+    orchestrator: Orchestrator,
+    chat_id: int,
+    text: str,
+    *,
+    reply_to_message_id: int | None = None,
+    thread_id: int | None = None,
+    allowed_roots: list[Path] | None = None,
+) -> None:
+    root = outbox_dir(orchestrator.paths.ductor_home)
+    delivery_id = enqueue_text(
+        root,
+        chat_id=chat_id,
+        text=text,
+        reply_to_message_id=reply_to_message_id,
+        thread_id=thread_id,
+        allowed_roots=allowed_roots,
+    )
+    if delivery_id is not None:
+        await drain_once(bot, root)
+
+
 @dataclass(slots=True)
 class NonStreamingDispatch:
     """Input payload for one non-streaming message turn.
@@ -212,15 +236,14 @@ async def run_non_streaming_message(
         footer = _build_footer(result, dispatch.scene_config)
         result.text += footer
         reply_id = dispatch.reply_to.message_id if dispatch.reply_to else None
-        await send_rich(
+        await _enqueue_and_try_drain(
             dispatch.bot,
+            dispatch.orchestrator,
             dispatch.key.chat_id,
             result.text,
-            SendRichOpts(
-                reply_to_message_id=reply_id,
-                allowed_roots=dispatch.allowed_roots,
-                thread_id=dispatch.thread_id,
-            ),
+            reply_to_message_id=reply_id,
+            allowed_roots=dispatch.allowed_roots,
+            thread_id=dispatch.thread_id,
         )
         return result.text
     finally:
@@ -361,30 +384,47 @@ async def run_streaming_message(  # noqa: C901, PLR0915
         await editor.finalize(result.text)
 
         logger.info(
-            "Streaming flow completed fallback=%s content=%s",
+            "Streaming flow completed fallback=%s content=%s delivery_failed=%s",
             result.stream_fallback,
             editor.has_content,
+            editor.delivery_failed,
         )
 
-        if result.stream_fallback or not streamed_text_sent or not editor.has_content:
-            await send_rich(
+        if (
+            result.stream_fallback
+            or not streamed_text_sent
+            or not editor.has_content
+            or editor.delivery_failed
+        ):
+            await _enqueue_and_try_drain(
                 dispatch.bot,
+                dispatch.orchestrator,
                 dispatch.key.chat_id,
                 result.text,
-                SendRichOpts(
-                    reply_to_message_id=dispatch.message.message_id,
-                    allowed_roots=dispatch.allowed_roots,
-                    thread_id=dispatch.thread_id,
-                ),
-            )
-        else:
-            await send_files_from_text(
-                dispatch.bot,
-                dispatch.key.chat_id,
-                result.text,
+                reply_to_message_id=dispatch.message.message_id,
                 allowed_roots=dispatch.allowed_roots,
                 thread_id=dispatch.thread_id,
             )
+        else:
+            try:
+                await send_files_from_text(
+                    dispatch.bot,
+                    dispatch.key.chat_id,
+                    result.text,
+                    allowed_roots=dispatch.allowed_roots,
+                    thread_id=dispatch.thread_id,
+                )
+            except TelegramNetworkError:
+                logger.warning("Network error sending streamed response files; queued final text")
+                await _enqueue_and_try_drain(
+                    dispatch.bot,
+                    dispatch.orchestrator,
+                    dispatch.key.chat_id,
+                    result.text,
+                    reply_to_message_id=dispatch.message.message_id,
+                    allowed_roots=dispatch.allowed_roots,
+                    thread_id=dispatch.thread_id,
+                )
 
         return result.text
     finally:

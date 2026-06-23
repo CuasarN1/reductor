@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError, TelegramRetryAfter
 
 from ductor_bot.messenger.telegram.buttons import extract_buttons
 from ductor_bot.messenger.telegram.formatting import (
@@ -95,6 +95,7 @@ class _EditorState:
     edit_task: asyncio.Task[None] | None = None
     consecutive_failures: int = 0
     fallen_back: bool = False
+    delivery_failed: bool = False
 
 
 class EditStreamEditor:
@@ -126,6 +127,11 @@ class EditStreamEditor:
     def has_content(self) -> bool:
         """True if at least one message has been sent."""
         return self._s.messages_sent > 0
+
+    @property
+    def delivery_failed(self) -> bool:
+        """True if a Telegram network failure occurred while sending/editing."""
+        return self._s.delivery_failed
 
     async def append_text(self, text: str) -> None:
         """Accumulate a text chunk and schedule an edit."""
@@ -312,6 +318,9 @@ class EditStreamEditor:
         except TelegramBadRequest:
             logger.warning("HTML create failed, falling back to plain text")
             await self._create_message_plain(display)
+        except TelegramNetworkError:
+            self._s.delivery_failed = True
+            logger.warning("Network error creating stream message")
 
     async def _create_message_plain(self, text: str) -> None:
         """Fallback: send without HTML parse mode."""
@@ -326,6 +335,9 @@ class EditStreamEditor:
             self._s.messages_sent += 1
         except TelegramBadRequest:
             logger.exception("Failed to send even as plain text")
+        except TelegramNetworkError:
+            self._s.delivery_failed = True
+            logger.warning("Network error creating plain stream message")
 
     async def _edit_message(self, text: str) -> None:
         """Edit the active Telegram message with error handling."""
@@ -353,6 +365,9 @@ class EditStreamEditor:
             if self._s.consecutive_failures >= self._max_failures:
                 logger.warning("Too many edit failures, falling back to append mode")
                 self._s.fallen_back = True
+        except TelegramNetworkError:
+            self._s.delivery_failed = True
+            logger.warning("Network error editing stream message")
         except TelegramRetryAfter as exc:
             await asyncio.sleep(exc.retry_after)
             try:
@@ -363,6 +378,9 @@ class EditStreamEditor:
                     parse_mode=ParseMode.HTML,
                 )
                 self._s.consecutive_failures = 0
+            except TelegramNetworkError:
+                self._s.delivery_failed = True
+                logger.warning("Network error retrying stream edit after rate-limit")
             except (TelegramBadRequest, TelegramRetryAfter):
                 logger.warning("Edit retry after rate-limit also failed")
 
@@ -383,6 +401,9 @@ class EditStreamEditor:
                 message_id=self._s.active_msg.message_id,
                 reply_markup=markup,
             )
+        except TelegramNetworkError:
+            self._s.delivery_failed = True
+            logger.warning("Network error attaching button keyboard")
         except (TelegramBadRequest, TelegramRetryAfter):
             logger.warning("Failed to attach button keyboard")
 
@@ -403,13 +424,22 @@ class EditStreamEditor:
                     parse_mode=ParseMode.HTML,
                     message_thread_id=self._thread_id,
                 )
+            except TelegramNetworkError:
+                self._s.delivery_failed = True
+                logger.warning("Network error sending fallback stream chunk")
+                continue
             except TelegramBadRequest:
-                await self._bot.send_message(
-                    chat_id=self._chat_id,
-                    text=display,
-                    parse_mode=None,
-                    message_thread_id=self._thread_id,
-                )
+                try:
+                    await self._bot.send_message(
+                        chat_id=self._chat_id,
+                        text=display,
+                        parse_mode=None,
+                        message_thread_id=self._thread_id,
+                    )
+                except TelegramNetworkError:
+                    self._s.delivery_failed = True
+                    logger.warning("Network error sending plain fallback stream chunk")
+                    continue
             self._s.messages_sent += 1
 
 
