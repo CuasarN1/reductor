@@ -60,15 +60,16 @@ async def handle_abort(
     chat_id: int,
     message: Message,
 ) -> bool:
-    """Kill active CLI processes and send feedback.
+    """Kill active CLI processes in the current topic and send feedback.
 
     Returns True if handled, False if orchestrator not ready.
     """
     if orchestrator is None:
         return False
 
-    killed = await orchestrator.abort(chat_id)
-    logger.info("Abort requested killed=%d", killed)
+    thread_id = get_thread_id(message)
+    killed = await orchestrator.abort(chat_id, topic_id=thread_id)
+    logger.info("Abort requested chat=%d topic=%s killed=%d", chat_id, thread_id, killed)
     text = stop_text(bool(killed), orchestrator.active_provider_name)
     await send_rich(
         bot,
@@ -203,3 +204,83 @@ def strip_mention(text: str, bot_username: str | None) -> str:
         stripped = (text[:idx] + text[idx + len(tag) :]).strip()
         return stripped or text
     return text
+
+
+def build_reply_prompt(message: Message, user_text: str) -> str:
+    """Prefix *user_text* with the cited message of a Telegram reply (#135).
+
+    When the user replies to a message, the quoted text is prepended with
+    explicit labels so the agent can tell the citation from the new message::
+
+        The user is replying to this quoted message:
+        > <quoted text>
+
+        The user's message:
+        <user_text>
+
+    Prefers the user-selected quote fragment (Bot API 7.0+) over the full
+    replied-to body. Returns *user_text* unchanged when the message is not a
+    reply or the cited message carries no text — e.g. forum-topic service
+    messages or media-only replies without a caption.
+    """
+    cited = _cited_reply_text(message)
+    if cited is None:
+        return user_text
+    quoted = "\n".join(f"> {line}" for line in cited.splitlines())
+    return (
+        f"The user is replying to this quoted message:\n{quoted}\n\n"
+        f"The user's message:\n{user_text}"
+    )
+
+
+def prepend_reply_to_media(message: Message, media_prompt: str) -> str:
+    """Prefix a media prompt with the cited reply message (#135).
+
+    For non-text replies (voice/photo/video/...), the user's actual reply is the
+    attachment, so the quoted text plus an explicit attachment-type note is
+    prepended ahead of the ``[INCOMING FILE]`` block — e.g. a voicemail reply to
+    a cron brief. Returns *media_prompt* unchanged when the message is not a
+    reply or the cited message has no text (forum-topic service messages).
+    """
+    cited = _cited_reply_text(message)
+    if cited is None:
+        return media_prompt
+    quoted = "\n".join(f"> {line}" for line in cited.splitlines())
+    label = _reply_attachment_label(message)
+    return (
+        f"The user is replying to this quoted message:\n{quoted}\n\n"
+        f"Their reply is {label} (the attached file below).\n\n{media_prompt}"
+    )
+
+
+def _cited_reply_text(message: Message) -> str | None:
+    """Return the cited text of a Telegram reply, or ``None`` when absent.
+
+    Prefers the user-selected quote fragment over the full replied-to body
+    (text or caption); returns ``None`` for non-replies and text-less cited
+    messages (forum-topic service messages, media-only replies).
+    """
+    quote = message.quote
+    cited: str | None
+    if quote is not None and quote.text:
+        cited = quote.text
+    else:
+        replied = message.reply_to_message
+        cited = (replied.text or replied.caption) if replied is not None else None
+    if not cited or not cited.strip():
+        return None
+    return cited.strip()
+
+
+def _reply_attachment_label(message: Message) -> str:
+    """Human-readable label for the attachment type, matching ``_resolve_media``."""
+    labels = (
+        (message.photo, "an image"),
+        (message.document, "a document"),
+        (message.voice, "a voice message"),
+        (message.audio, "an audio file"),
+        (message.video, "a video"),
+        (message.video_note, "a video note"),
+        (message.sticker, "a sticker"),
+    )
+    return next((label for value, label in labels if value), "a file")

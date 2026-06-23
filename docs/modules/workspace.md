@@ -105,6 +105,10 @@ Deployment outputs per authenticated provider:
 - Codex -> `AGENTS.md`
 - Gemini -> `GEMINI.md`
 
+Antigravity is a CLI provider, but workspace rule deployment has no dedicated
+Antigravity rule-file target; it still deploys only the Claude, Codex, and Gemini
+rule-file names above.
+
 Cleanup removes stale provider files for unauthenticated providers, except inside `workspace/cron_tasks/` (user-owned task rules).
 
 ## Rule sync (`sync_rule_files`)

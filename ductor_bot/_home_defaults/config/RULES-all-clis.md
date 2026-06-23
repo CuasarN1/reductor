@@ -15,9 +15,9 @@ Edit only when the user asks for behavior changes.
 
 ### Model and Provider
 
-- `provider`: `claude`, `codex`, or `gemini`
+- `provider`: `claude`, `codex`, `gemini`, or `antigravity`
 - `model`: default model id
-  - Claude models: `haiku`, `sonnet`, `opus`
+  - Claude models: `haiku`, `sonnet`, `sonnet[1m]`, `opus`, `opus[1m]`, `fable`
   - Codex models:
     - `gpt-5.2-codex` - Frontier agentic coding model
     - `gpt-5.3-codex` - Latest frontier agentic coding model
@@ -31,6 +31,11 @@ Edit only when the user asks for behavior changes.
     - `gemini-3-pro-preview` - Next-gen preview
     - `gemini-3-flash-preview` - Next-gen fast preview
     - `gemini-3.1-pro-preview` - Latest preview
+  - Antigravity models:
+    - `antigravity-default` - Let `agy` choose the provider-level default
+    - Display names from `config/antigravity_models.json` may be known at runtime,
+      but the chat model selector currently exposes only `antigravity-default`
+      because `agy` model selection is not reliable there
 - `reasoning_effort`: `low|medium|high|xhigh` (Codex only)
   - Most models support: `low`, `medium`, `high`, `xhigh`
   - `gpt-5.1-codex-mini` only: `medium`, `high`
@@ -85,6 +90,7 @@ For user-facing schedules, set `user_timezone` explicitly.
 - `cli_parameters.claude`: List of extra CLI flags for Claude main agent (e.g., `["--chrome"]`)
 - `cli_parameters.codex`: List of extra CLI flags for Codex main agent (e.g., `["--chrome"]`)
 - `cli_parameters.gemini`: List of extra CLI flags for Gemini main agent
+- `cli_parameters.antigravity`: List of extra CLI flags for Antigravity main agent (e.g., `["--log-file", "agy.log"]`)
 
 These parameters are appended to every CLI invocation for the respective provider.
 Parameters are inserted before the `--` separator in commands.
@@ -95,7 +101,8 @@ Parameters are inserted before the `--` separator in commands.
   "cli_parameters": {
     "claude": ["--chrome"],
     "codex": ["--chrome"],
-    "gemini": ["--sandbox"]
+    "gemini": ["--sandbox"],
+    "antigravity": ["--log-file", "agy.log"]
   }
 }
 ```

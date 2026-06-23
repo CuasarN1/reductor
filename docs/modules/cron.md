@@ -25,6 +25,10 @@ Routing fields:
 - `topic_id` (default `None`) -- optional forum topic within target chat
 - `transport` (default `"tg"`) -- transport identifier (`"tg"` or `"mx"`)
 
+Routing fields are editable in place via the `cron_edit` tool
+(`--chat-id`, `--topic-id`, `--transport`, `--clear-topic-id`) to redirect an
+existing job to a different chat or topic.
+
 Execution overrides:
 
 - `provider`
@@ -36,6 +40,10 @@ Scheduling guards:
 
 - `quiet_start`, `quiet_end`
 - `dependency`
+
+Delivery:
+
+- `silent_on_success` (default `false`) -- suppress result delivery when the run succeeds; errors are still delivered
 
 ## Persistence
 
@@ -82,6 +90,8 @@ Supported providers:
 - Codex
 - Gemini
 
+Antigravity is not supported in the cron one-shot command builder. Use a supported provider override for cron jobs when the global chat provider is `antigravity`.
+
 Examples:
 
 - Claude: `claude -p --output-format json ... --no-session-persistence -- <prompt>`
@@ -114,6 +124,11 @@ Folder-missing nuance:
 
 - `error:folder_missing` updates `last_run_status`
 - no result callback is emitted for that path
+
+Silent-on-success nuance:
+
+- when `silent_on_success` is set and the run succeeds, `last_run_status` is updated but no result callback is emitted
+- failures (any `error:*` status) are always delivered
 
 ## Result routing
 

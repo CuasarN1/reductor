@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Claude Code, Codex CLI, and Gemini CLI as your coding assistant — on Telegram and Matrix.</strong><br>
+  <strong>Claude Code, Codex CLI, Gemini CLI, and Antigravity CLI as your coding assistant — on Telegram and Matrix.</strong><br>
   Uses only official CLIs. Nothing spoofed. Optional proxy support and durable Telegram delivery are available. Multi-transport, automation, and sub-agents in one runtime.
 </p>
 
@@ -24,9 +24,9 @@
 
 ---
 
-If you want to control Claude Code, Google's Gemini CLI, or OpenAI's Codex CLI via Telegram or Matrix, build automations, or manage multiple agents easily — ductor is the right tool for you. The messaging layer is modular: Telegram and Matrix ship today, and new transports plug into the same transport-agnostic core.
+If you want to control Claude Code, Google's Gemini CLI, OpenAI's Codex CLI, or Antigravity CLI via Telegram or Matrix, build automations, or manage multiple agents easily — ductor is the right tool for you. The messaging layer is modular: Telegram and Matrix ship today, and new transports plug into the same transport-agnostic core.
 
-ductor runs on your machine and sends simple console commands as if you were typing them yourself, so you can use your active subscriptions (Claude Max, etc.) directly. No SDK patching, no spoofed headers, no custom provider API shim. Just the official CLIs, executed as subprocesses, with all state kept in plain JSON and Markdown under `~/.ductor/`.
+ductor runs on your machine and sends simple console commands as if you were typing them yourself, so you can use your active subscriptions (Claude Max, Google AI Ultra, etc.) directly. No provider API proxying, no SDK patching, no spoofed headers, no custom provider API shim. Just the official CLIs, executed as subprocesses, with all state kept in plain JSON and Markdown under `~/.ductor/`.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/PleasePrompto/ductor/main/docs/images/ductor-start.jpeg" alt="ductor /start screen" width="49%" />
@@ -42,7 +42,7 @@ ductor
 
 The onboarding wizard handles CLI checks, transport setup (Telegram or Matrix), timezone, optional Docker, and optional background service install.
 
-**Requirements:** Python 3.11+, at least one CLI installed (`claude`, `codex`, or `gemini`), and either:
+**Requirements:** Python 3.11+, at least one CLI installed (`claude`, `codex`, `gemini`, or `agy`), and either:
 
 - a Telegram Bot Token from [@BotFather](https://t.me/BotFather), or
 - a Matrix account on a homeserver (homeserver URL, user ID, password/access token)
@@ -53,8 +53,8 @@ Detailed setup: [`docs/installation.md`](docs/installation.md)
 
 ## Fork additions
 
-This fork is based on upstream `v0.17.0` and adds a few operational features
-that are useful for always-on Telegram deployments:
+This fork tracks upstream ductor and adds a few operational features that are
+useful for always-on Telegram deployments:
 
 - **Proxy-aware Telegram runtime** — Telegram Bot API traffic can use
   `DUCTOR_TELEGRAM_PROXY_URL`, while provider CLIs inherit standard proxy
@@ -124,7 +124,7 @@ ductor gives you multiple ways to interact with your coding agents. Each level b
 
 ### 1. Single chat (your main agent)
 
-This is where everyone starts. You get a private 1:1 chat with your bot (Telegram or Matrix). Every message goes to the CLI you have active (`claude`, `codex`, or `gemini`), responses stream back in real time.
+This is where everyone starts. You get a private 1:1 chat with your bot (Telegram or Matrix). Every message goes to the CLI you have active (`claude`, `codex`, `gemini`, or `agy`), responses stream back in real time.
 
 ```text
 You:   "Explain the auth flow in this codebase"
@@ -263,10 +263,11 @@ Main chat:  "Ask codex-agent to write tests for the API"
 - **Multi-language** — UI in English, Deutsch, Nederlands, Français, Русский, Español, Português
 - **Real-time streaming** — live message edits (Telegram) or segment-based output (Matrix)
 - **Telegram reasoning + tool UX controls** — optional reasoning stream, live tool progress, and separate thinking indicator controls
-- **Provider switching** — `/model` to change provider/model (never blocks, even during active processes)
+- **Quoted-reply context** — replying to a message (Telegram) carries the cited text into the agent prompt, so follow-ups like "expand on this" keep their reference
+- **Four coding agents** — Claude Code, Codex CLI, Gemini CLI, and Antigravity (`agy`), switchable per chat/topic with `/model` (never blocks, even during active processes)
 - **Persistent memory** — plain Markdown files that survive across sessions
 - **Memory maintenance** — pre-compaction flush, optional reflection cadence, and LLM-driven compaction
-- **Cron jobs** — in-process scheduler with timezone support, per-job overrides, result routing to originating chat
+- **Cron jobs** — in-process scheduler with timezone support, per-job overrides, optional silent-on-success, result routing to originating chat
 - **Webhooks** — `wake` (inject into active chat) and `cron_task` (isolated task run) modes
 - **Heartbeat** — proactive checks with per-target settings, group/topic support, chat validation
 - **Durable Telegram delivery** — final replies are retried from an on-disk outbox after proxy/network failures
@@ -280,7 +281,7 @@ Main chat:  "Ask codex-agent to write tests for the API"
 - **Proxy support** — Telegram Bot API proxy plus inherited proxy env for provider CLIs
 - **Docker sandbox** — optional sidecar container with configurable host mounts
 - **Service manager** — Linux (systemd), macOS (launchd), Windows (Task Scheduler)
-- **Cross-tool skill sync** — shared skills across `~/.claude/`, `~/.codex/`, `~/.gemini/`
+- **Cross-tool skill sync** — shared skills across `~/.claude/`, `~/.codex/`, `~/.gemini/` (globally or per-provider toggleable)
 
 ## Messenger support
 
@@ -382,6 +383,7 @@ This is **hot-reloadable** — change the language without restarting the bot.
 |---|---|
 | `/model` | Interactive model/provider selector |
 | `/new` | Reset the configured default-provider session for this chat/topic |
+| `/reset` | Reset the currently active provider session for this chat/topic |
 | `/stop` | Stop current message and discard queued messages |
 | `/interrupt` | Interrupt current message, queued messages continue |
 | `/stop_all` | Kill everything — all messages, sessions, tasks, all agents |
@@ -400,7 +402,7 @@ This is **hot-reloadable** — change the language without restarting the bot.
 | `/leave <id>` | Manually leave a group |
 | `/info` | Version + links |
 
-`/new` is intentionally a factory reset for the current `SessionKey`: it clears the bucket tied to the configured default model/provider for that chat or topic, not whichever provider you last switched to temporarily via `/model`.
+`/new` is intentionally a factory reset for the current `SessionKey`: it clears the bucket tied to the configured default model/provider for that chat or topic, not whichever provider you last switched to temporarily via `/model`. Use `/reset` when you want to clear the provider bucket that is currently active in that chat or topic.
 
 ### File browser root
 
@@ -500,7 +502,7 @@ Full config reference: [`docs/config.md`](docs/config.md) — full example with 
 
 Other projects manipulate SDKs or patch CLIs and risk violating provider terms of service. ductor simply runs the official CLI binaries as subprocesses — nothing more.
 
-- Official CLIs only (`claude`, `codex`, `gemini`)
+- Official CLIs only (`claude`, `codex`, `gemini`, `agy`)
 - Rule files are plain Markdown (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`)
 - Memory is one Markdown file per agent
 - All state is JSON — no database, no external services

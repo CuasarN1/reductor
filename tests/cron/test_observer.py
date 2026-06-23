@@ -41,12 +41,12 @@ def _make_config(**overrides: Any) -> AgentConfig:
     return AgentConfig(**overrides)
 
 
-def _make_codex_cache() -> CodexModelCache:
-    """Return a mock CodexModelCache."""
+def _make_codex_cache(model_id: str = "gpt-5.2-codex") -> CodexModelCache:
+    """Return a mock CodexModelCache resolving *model_id*."""
     cache = MagicMock(spec=CodexModelCache)
     cache.validate_model.return_value = True
     cache.get_model.return_value = CodexModelInfo(
-        id="gpt-5.2-codex",
+        id=model_id,
         display_name="GPT-5.2 Codex",
         description="Codex model",
         supported_efforts=("low", "medium", "high"),
@@ -333,16 +333,7 @@ class TestCronObserverExecution:
         task_folder.mkdir()
 
         # Mock cache for Codex model
-        codex_cache = _make_codex_cache()
-        codex_cache.validate_model.return_value = True
-        codex_cache.get_model.return_value = CodexModelInfo(
-            id="gpt-5.2",
-            display_name="GPT-5.2",
-            description="Codex model",
-            supported_efforts=("low", "medium", "high"),
-            default_effort="medium",
-            is_default=True,
-        )
+        codex_cache = _make_codex_cache(model_id="gpt-5.2")
 
         observer = _make_observer(
             paths,
@@ -668,9 +659,9 @@ class TestCronResultDelivery:
 
         original_update = mgr.update_run_status
 
-        def track_update(*args: object, **kwargs: object) -> None:
+        def track_update(job_id: str, *, status: str) -> None:
             call_order.append("file_written")
-            original_update(*args, **kwargs)
+            original_update(job_id, status=status)
 
         observer.set_result_handler(track_result)
 
@@ -712,6 +703,59 @@ class TestCronResultDelivery:
         assert chat_id == 0
         assert topic_id is None
         assert transport == "tg"
+
+    async def test_silent_on_success_suppresses_delivery(self, tmp_path: Path) -> None:
+        """silent_on_success mutes the push on success but still records status (#133)."""
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        mgr.add_job(_make_job("reindex", title="Reindex", silent_on_success=True))
+        (paths.cron_tasks_dir / "reindex").mkdir()
+
+        observer = _make_observer(paths, mgr)
+        callback = AsyncMock()
+        observer.set_result_handler(callback)
+
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b'{"result": "indexed 5000 files"}', b""))
+
+        with (
+            time_machine.travel(datetime(2026, 1, 15, 14, 0, tzinfo=UTC)),
+            patch("ductor_bot.cron.execution.which", return_value="/usr/bin/claude"),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            await observer._execute_job("reindex", "Do work", "reindex")
+
+        callback.assert_not_awaited()
+        job = mgr.get_job("reindex")
+        assert job is not None
+        assert job.last_run_status == "success"
+
+    async def test_silent_on_success_still_delivers_on_error(self, tmp_path: Path) -> None:
+        """silent_on_success never mutes the failure path (#133)."""
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        mgr.add_job(_make_job("reindex", title="Reindex", silent_on_success=True))
+        (paths.cron_tasks_dir / "reindex").mkdir()
+
+        observer = _make_observer(paths, mgr)
+        callback = AsyncMock()
+        observer.set_result_handler(callback)
+
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 1
+        mock_proc.communicate = AsyncMock(return_value=(b'{"result": "boom"}', b""))
+
+        with (
+            time_machine.travel(datetime(2026, 1, 15, 14, 0, tzinfo=UTC)),
+            patch("ductor_bot.cron.execution.which", return_value="/usr/bin/claude"),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            await observer._execute_job("reindex", "Do work", "reindex")
+
+        callback.assert_awaited_once()
+        status = callback.call_args[0][2]
+        assert status.startswith("error")
 
     async def test_run_at_catches_unexpected_exception(self, tmp_path: Path) -> None:
         """Unexpected exception in _execute_job does not crash the observer."""

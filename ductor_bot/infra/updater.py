@@ -11,6 +11,7 @@ import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from ductor_bot.infra.platform import CREATION_FLAGS as _CREATION_FLAGS
 from ductor_bot.infra.version import VersionInfo, _parse_version, check_pypi
 
 logger = logging.getLogger(__name__)
@@ -122,6 +123,7 @@ async def _run_upgrade_command(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
         env=env,
+        creationflags=_CREATION_FLAGS,
     )
     stdout, _ = await proc.communicate()
     output = stdout.decode(errors="replace") if stdout else ""
@@ -180,6 +182,7 @@ async def get_installed_version() -> str:
         "from importlib.metadata import version; print(version('ductor'))",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
+        creationflags=_CREATION_FLAGS,
     )
     stdout, _ = await proc.communicate()
     return stdout.decode().strip() if stdout else "0.0.0"

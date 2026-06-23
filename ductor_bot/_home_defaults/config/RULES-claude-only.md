@@ -17,7 +17,7 @@ Edit only when the user asks for behavior changes.
 
 - `provider`: `claude`
 - `model`: default model id
-  - Available: `haiku`, `sonnet`, `opus`
+  - Available: `haiku`, `sonnet`, `sonnet[1m]`, `opus`, `opus[1m]`, `fable`
 - `permission_mode`: CLI permission behavior
 
 ### Time and Scheduling

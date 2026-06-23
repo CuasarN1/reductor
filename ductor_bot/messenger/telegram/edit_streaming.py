@@ -287,12 +287,23 @@ class EditStreamEditor:
         else:
             await self._create_message(chunks[0])
 
-        # Seal: reset state for continuation in a new message
         logger.debug("Message sealed, starting new segment")
-        self._s.active_msg = None
-        self._s.sealed_segment_idx = len(self._s.segments)
+
+        # We must permanently split our state so the next render doesn't include chunks[0] again.
+        self._flush_text_segment()
+        if self._s.tool_tracker.has_entries:
+            self._flush_tool_segment()
 
         remaining = "\n\n".join(chunks[1:])
+
+        # Discard the old unsealed segments and indicators, replace with the remaining HTML
+        self._s.segments = self._s.segments[: self._s.sealed_segment_idx]
+        if remaining.strip():
+            self._s.segments.append(remaining)
+
+        self._s.indicator_indices.clear()
+
+        self._s.active_msg = None
         if remaining.strip():
             await self._create_message(remaining)
         self._s.last_edit_time = asyncio.get_event_loop().time()

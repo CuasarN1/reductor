@@ -69,6 +69,12 @@ class TestCronJob:
         job = CronJob.from_dict(data)
         assert job.enabled is True
         assert job.last_run_at is None
+        assert job.silent_on_success is False
+
+    def test_silent_on_success_roundtrip(self) -> None:
+        job = _make_job(silent_on_success=True)
+        restored = CronJob.from_dict(job.to_dict())
+        assert restored.silent_on_success is True
 
     def test_auto_created_at(self) -> None:
         job = _make_job()

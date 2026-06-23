@@ -51,6 +51,9 @@ class CronJob:
     topic_id: int | None = None
     transport: str = "tg"
 
+    # Mute delivery on the success path; errors are still delivered (#133)
+    silent_on_success: bool = False
+
     def __post_init__(self) -> None:
         if not self.created_at:
             self.created_at = datetime.now(UTC).isoformat()
@@ -77,6 +80,7 @@ class CronJob:
             "chat_id": self.chat_id,
             "topic_id": self.topic_id,
             "transport": self.transport,
+            "silent_on_success": self.silent_on_success,
         }
         if self.timezone:
             result["timezone"] = self.timezone
@@ -106,6 +110,7 @@ class CronJob:
             chat_id=data.get("chat_id", 0),
             topic_id=data.get("topic_id"),
             transport=data.get("transport", "tg"),
+            silent_on_success=data.get("silent_on_success", False),
         )
 
 

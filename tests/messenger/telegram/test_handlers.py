@@ -50,7 +50,7 @@ class TestHandleAbort:
         msg = _make_message(chat_id=42)
         result = await handle_abort(orchestrator, bot, chat_id=42, message=msg)
         assert result is True
-        orchestrator.abort.assert_called_once_with(42)
+        orchestrator.abort.assert_called_once_with(42, topic_id=None)
 
     async def test_abort_no_orchestrator(self) -> None:
         from ductor_bot.messenger.telegram.handlers import handle_abort
@@ -184,8 +184,118 @@ class TestStripMention:
         assert strip_mention("@bot hi", None) == "@bot hi"
 
 
+class TestBuildReplyPrompt:
+    """Reply-context prompt construction for Telegram replies (#135)."""
+
+    @staticmethod
+    def _message(
+        *,
+        quote_text: str | None = None,
+        reply_text: str | None = None,
+        reply_caption: str | None = None,
+        has_reply: bool = False,
+    ) -> Message:
+        message = MagicMock(spec=Message)
+        message.quote = MagicMock(text=quote_text) if quote_text is not None else None
+        if has_reply or reply_text is not None or reply_caption is not None:
+            message.reply_to_message = MagicMock(text=reply_text, caption=reply_caption)
+        else:
+            message.reply_to_message = None
+        return message
+
+    def test_quote_fragment_preferred(self) -> None:
+        from ductor_bot.messenger.telegram.handlers import build_reply_prompt
+
+        msg = self._message(quote_text="point 2", reply_text="the full brief")
+        prompt = build_reply_prompt(msg, "expand on this")
+        assert "> point 2" in prompt
+        assert "the full brief" not in prompt
+        assert prompt.endswith("The user's message:\nexpand on this")
+
+    def test_reply_text_is_quoted_and_labeled(self) -> None:
+        from ductor_bot.messenger.telegram.handlers import build_reply_prompt
+
+        msg = self._message(reply_text="line one\nline two")
+        prompt = build_reply_prompt(msg, "go on")
+        assert "The user is replying to this quoted message:\n> line one\n> line two" in prompt
+        assert prompt.endswith("The user's message:\ngo on")
+
+    def test_caption_used_when_no_text(self) -> None:
+        from ductor_bot.messenger.telegram.handlers import build_reply_prompt
+
+        prompt = build_reply_prompt(self._message(reply_caption="a photo caption"), "what is this")
+        assert "> a photo caption" in prompt
+
+    def test_no_reply_returns_text_unchanged(self) -> None:
+        from ductor_bot.messenger.telegram.handlers import build_reply_prompt
+
+        assert build_reply_prompt(self._message(), "hello") == "hello"
+
+    def test_service_message_without_text_unchanged(self) -> None:
+        from ductor_bot.messenger.telegram.handlers import build_reply_prompt
+
+        # Forum-topic service messages carry neither text nor caption.
+        assert build_reply_prompt(self._message(has_reply=True), "hi") == "hi"
+
+
+class TestPrependReplyToMedia:
+    """Reply-context prefixing for non-text (media) replies (#135)."""
+
+    _MEDIA_ATTRS = ("photo", "document", "voice", "audio", "video", "video_note", "sticker")
+
+    @classmethod
+    def _message(cls, *, reply_text: str | None = None, kind: str | None = None) -> Message:
+        message = MagicMock(spec=Message)
+        message.quote = None
+        message.reply_to_message = (
+            MagicMock(text=reply_text, caption=None) if reply_text is not None else None
+        )
+        for attr in cls._MEDIA_ATTRS:
+            setattr(message, attr, "x" if attr == kind else None)
+        return message
+
+    def test_prefixes_quote_and_labels_voice(self) -> None:
+        from ductor_bot.messenger.telegram.handlers import prepend_reply_to_media
+
+        msg = self._message(reply_text="Point 3: deploy Friday", kind="voice")
+        out = prepend_reply_to_media(msg, "[INCOMING FILE]\n...")
+        assert "The user is replying to this quoted message:\n> Point 3: deploy Friday" in out
+        assert "Their reply is a voice message (the attached file below)." in out
+        assert out.endswith("[INCOMING FILE]\n...")
+
+    def test_labels_image(self) -> None:
+        from ductor_bot.messenger.telegram.handlers import prepend_reply_to_media
+
+        msg = self._message(reply_text="the brief", kind="photo")
+        assert "Their reply is an image" in prepend_reply_to_media(msg, "BODY")
+
+    def test_labels_video(self) -> None:
+        from ductor_bot.messenger.telegram.handlers import prepend_reply_to_media
+
+        msg = self._message(reply_text="the brief", kind="video")
+        assert "Their reply is a video" in prepend_reply_to_media(msg, "BODY")
+
+    def test_no_reply_returns_media_prompt_unchanged(self) -> None:
+        from ductor_bot.messenger.telegram.handlers import prepend_reply_to_media
+
+        assert prepend_reply_to_media(self._message(kind="voice"), "BODY") == "BODY"
+
+
 class TestForumTopicPropagation:
     """Test that handlers extract and propagate thread_id."""
+
+    @patch("ductor_bot.messenger.telegram.handlers.send_rich", new_callable=AsyncMock)
+    async def test_abort_entrypoint_passes_topic_id(self, _mock_send: AsyncMock) -> None:
+        from ductor_bot.messenger.telegram.handlers import handle_abort
+
+        orchestrator = MagicMock()
+        orchestrator.abort = AsyncMock(return_value=1)
+        orchestrator.active_provider_name = "claude"
+        bot = MagicMock()
+        msg = _make_message(chat_id=42, topic_thread_id=99)
+
+        await handle_abort(orchestrator, bot, chat_id=42, message=msg)
+        orchestrator.abort.assert_called_once_with(42, topic_id=99)
 
     @patch("ductor_bot.messenger.telegram.handlers.send_rich", new_callable=AsyncMock)
     async def test_handle_abort_passes_thread_id(self, mock_send: AsyncMock) -> None:

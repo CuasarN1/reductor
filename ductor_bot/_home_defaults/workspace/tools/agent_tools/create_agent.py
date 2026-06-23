@@ -42,7 +42,7 @@ def _agents_path() -> Path:
     return direct
 
 
-_CLAUDE_MODELS = ("haiku", "sonnet", "opus")
+_CLAUDE_MODELS = ("haiku", "sonnet", "sonnet[1m]", "opus", "opus[1m]", "fable")
 
 
 def _main_home() -> Path:
@@ -101,7 +101,9 @@ def _resolve_model(provider: str | None, model: str | None) -> str | None:
 
     Catches common mistakes like ``--model codex`` (provider name, not a model).
     Uses cached model lists from ``config/codex_models.json`` and
-    ``config/gemini_models.json``, and hardcoded Claude models.
+    ``config/gemini_models.json`` and hardcoded Claude models. Antigravity
+    names pass through unchanged; prefer ``antigravity-default`` because
+    ``agy`` model selection is not reliable.
     """
     if model is None or provider is None:
         return model
@@ -151,7 +153,8 @@ def main() -> None:
     parser.add_argument("--homeserver", default=None, help="Matrix homeserver URL (https://...)")
     parser.add_argument("--user-id", default=None, help="Matrix bot user ID (@bot:server)")
     parser.add_argument(
-        "--password", default=None,
+        "--password",
+        default=None,
         help="Matrix account password (optional; needed for first login if no access_token)",
     )
     parser.add_argument(
@@ -166,7 +169,11 @@ def main() -> None:
     )
 
     # Common
-    parser.add_argument("--provider", default=None, help="AI provider (claude/openai/gemini)")
+    parser.add_argument(
+        "--provider",
+        default=None,
+        help="AI provider (claude/openai/gemini/antigravity)",
+    )
     parser.add_argument(
         "--model",
         default=None,

@@ -189,6 +189,23 @@ class TestEditStreamEditor:
         assert "[TOOL: Read]" in last_text
         assert "x1" not in last_text
 
+    async def test_overflow_continuation_excludes_sealed_content(self) -> None:
+        """Overflow seals the first message; its content must not repeat afterwards."""
+        bot, editor = _make_editor()
+        await editor.append_text("A" * 3000)
+        await editor.append_text("B" * 3000)
+
+        # First message sealed via edit, continuation sent as a second message
+        assert bot.send_message.call_count == 2
+        continuation = str(bot.send_message.call_args.kwargs["text"])
+        assert "AAA" not in continuation
+
+        # Later edits render only the unsealed remainder, not the sealed chunk
+        await editor.append_text("C" * 10)
+        edited = str(bot.edit_message_text.call_args.kwargs["text"])
+        assert "AAA" not in edited
+        assert "CCC" in edited
+
     @staticmethod
     def _get_last_message_text(bot: MagicMock) -> str:
         """Extract the text from the last send_message or edit_message_text call."""

@@ -231,3 +231,43 @@ def test_cron_edit_nonexistent_exits_1(tmp_path: Path) -> None:
     assert result.returncode == 1
     output = json.loads(result.stdout)
     assert "not found" in output["error"]
+
+
+def test_cron_edit_redirects_destination(tmp_path: Path) -> None:
+    _add_job(tmp_path, "route-job")
+
+    result = _run(
+        tmp_path,
+        TOOL_EDIT,
+        ["route-job", "--chat-id", "555", "--topic-id", "42", "--transport", "mx"],
+    )
+    assert result.returncode == 0
+    job = _job(tmp_path, "route-job")
+    assert job["chat_id"] == 555
+    assert job["topic_id"] == 42
+    assert job["transport"] == "mx"
+
+
+def test_cron_edit_clear_topic_id_routes_to_main_thread(tmp_path: Path) -> None:
+    _add_job(tmp_path, "topic-job")
+    _run(tmp_path, TOOL_EDIT, ["topic-job", "--topic-id", "7"])
+
+    result = _run(tmp_path, TOOL_EDIT, ["topic-job", "--clear-topic-id"])
+    assert result.returncode == 0
+    assert _job(tmp_path, "topic-job")["topic_id"] is None
+
+
+def test_cron_edit_toggles_silent_on_success(tmp_path: Path) -> None:
+    _add_job(tmp_path, "silent-job")
+
+    assert _run(tmp_path, TOOL_EDIT, ["silent-job", "--silent-on-success"]).returncode == 0
+    assert _job(tmp_path, "silent-job")["silent_on_success"] is True
+
+    assert _run(tmp_path, TOOL_EDIT, ["silent-job", "--no-silent-on-success"]).returncode == 0
+    assert _job(tmp_path, "silent-job")["silent_on_success"] is False
+
+
+def test_cron_edit_rejects_invalid_transport(tmp_path: Path) -> None:
+    _add_job(tmp_path, "bad-transport")
+    result = _run(tmp_path, TOOL_EDIT, ["bad-transport", "--transport", "carrier-pigeon"])
+    assert result.returncode == 2  # argparse rejects invalid choice

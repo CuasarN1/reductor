@@ -7,9 +7,12 @@ Scripts for creating, editing, listing, and removing scheduled jobs.
 **When the user requests a new cron job, you MUST ask:**
 
 1. **Which model?**
-   - `haiku` - Fast and cost-effective
-   - `sonnet` - Balanced performance (recommended)
-   - `opus` - Most capable, highest quality
+- `haiku` - Fast and cost-effective
+- `sonnet` - Balanced performance (recommended)
+- `sonnet[1m]` - Sonnet with Claude Code 1M-context beta
+- `opus` - Most capable, highest quality
+- `opus[1m]` - Opus with Claude Code 1M-context beta
+- `fable` - Latest Fable alias when supported by Claude Code
 
 2. **Should this job respect quiet hours?**
    - Ask: "Should this job skip execution during specific hours (e.g., at night)?"
@@ -61,7 +64,7 @@ python3 tools/cron_tools/cron_add.py \
 ```
 
 **Available parameters:**
-- `--model` - Model choice: `haiku`, `sonnet`, `opus` (optional, uses global config if omitted)
+- `--model` - Model choice: `haiku`, `sonnet`, `sonnet[1m]`, `opus`, `opus[1m]`, `fable` (optional, uses global config if omitted)
 - `--cli-parameters` - Advanced: JSON array of CLI flags (only if user explicitly requests)
 
 ### List Jobs

@@ -32,6 +32,7 @@ from ductor_bot.orchestrator.commands import (
     cmd_memory,
     cmd_model,
     cmd_reset,
+    cmd_reset_current,
     cmd_sessions,
     cmd_status,
     cmd_tasks,
@@ -149,6 +150,7 @@ class Orchestrator:
                 claude_cli_parameters=tuple(config.cli_parameters.claude),
                 codex_cli_parameters=tuple(config.cli_parameters.codex),
                 gemini_cli_parameters=tuple(config.cli_parameters.gemini),
+                antigravity_cli_parameters=tuple(config.cli_parameters.antigravity),
                 agent_name=agent_name,
                 interagent_port=interagent_port,
                 transcribe_command=config.transcription.audio_command,
@@ -326,6 +328,7 @@ class Orchestrator:
 
     async def _handle_message_impl(self, dispatch: _MessageDispatch) -> OrchestratorResult:
         self._process_registry.clear_abort(dispatch.key.chat_id)
+        self._process_registry.clear_topic_abort(dispatch.key.chat_id, dispatch.key.topic_id)
         logger.info("Message received text=%s", dispatch.cmd[:80])
 
         patterns = detect_suspicious_patterns(dispatch.text)
@@ -408,6 +411,8 @@ class Orchestrator:
     def _register_commands(self) -> None:
         reg = self._command_registry
         reg.register_async("/new", cmd_reset)
+        reg.register_async("/reset", cmd_reset_current)
+        reg.register_async("/reset ", cmd_reset_current)
         # /stop is handled entirely by the Middleware abort path (before the lock)
         # and never reaches the orchestrator command registry.
         reg.register_async("/status", cmd_status)
@@ -447,6 +452,21 @@ class Orchestrator:
         await self._sessions.reset_session(key)
         logger.info("Session reset")
 
+    async def reset_current_provider_session(self, key: SessionKey) -> str:
+        """Reset the bucket the user is currently on, keeping that provider active.
+
+        Unlike ``reset_active_provider_session`` (``/new`` -> config default), this
+        clears the *currently active* provider's bucket and stays on it.
+        """
+        active = await self._sessions.get_active(key)
+        if active is None:
+            model, provider = self.resolve_runtime_target(self._config.model)
+        else:
+            model, provider = active.model, active.provider
+        await self._sessions.reset_provider_session(key, provider=provider, model=model)
+        logger.info("Current provider session reset provider=%s model=%s", provider, model)
+        return provider
+
     async def reset_active_provider_session(self, key: SessionKey) -> str:
         """Reset the active provider bucket to the config-default model.
 
@@ -464,8 +484,22 @@ class Orchestrator:
         logger.info("Active provider session reset provider=%s model=%s", provider, model)
         return provider
 
-    async def abort(self, chat_id: int) -> int:
-        """Kill all active CLI processes and background tasks for chat_id."""
+    async def abort(self, chat_id: int, topic_id: int | None = None) -> int:
+        """Kill active CLI processes for *chat_id* (optionally scoped to *topic_id*).
+
+        When ``topic_id`` is provided (``/stop`` from a specific topic),
+        only the foreground CLI processes registered under that
+        ``(chat_id, topic_id)`` pair are killed. Background tasks and
+        named sessions are left alone — they are not topic-tagged in
+        the current model and have their own management surfaces
+        (``/tasks``, ``/sessions``) so /stop should not double up.
+
+        When ``topic_id`` is ``None`` (legacy callers / ``/stop_all``)
+        the chat-wide sweep runs as before: every process for the chat
+        plus every background task and named session.
+        """
+        if topic_id is not None:
+            return await self._process_registry.kill_by_chat_topic(chat_id, topic_id)
         killed = await self._process_registry.kill_all(chat_id)
         if self._observers.background:
             killed += await self._observers.background.cancel_all(chat_id)
@@ -684,6 +718,7 @@ class Orchestrator:
                     claude_cli_parameters=tuple(config.cli_parameters.claude),
                     codex_cli_parameters=tuple(config.cli_parameters.codex),
                     gemini_cli_parameters=tuple(config.cli_parameters.gemini),
+                    antigravity_cli_parameters=tuple(config.cli_parameters.antigravity),
                     transcribe_command=config.transcription.audio_command,
                     video_transcribe_command=config.transcription.video_command,
                 )

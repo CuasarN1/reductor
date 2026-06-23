@@ -50,6 +50,12 @@ CHANGES:
   --quiet-start <hour>       Start of quiet hours (0-23, job won't run during this time)
   --quiet-end <hour>         End of quiet hours (0-23, exclusive)
   --dependency "<name>"      Resource dependency for sequential execution (e.g. 'chrome_browser')
+  --chat-id <id>             Redirect delivery to this chat ID
+  --topic-id <id>            Redirect delivery to this forum topic (thread) ID
+  --transport <tg|mx>        Delivery transport: 'tg' (Telegram) or 'mx' (Matrix)
+  --clear-topic-id           Route to the chat's main thread instead of a topic
+  --silent-on-success        Suppress the push on success (errors still delivered)
+  --no-silent-on-success     Always deliver results, even on success (default)
   --clear-provider           Remove provider override (use global config)
   --clear-model              Remove model override (use global config)
   --clear-reasoning-effort   Remove reasoning override (use global config/model default)
@@ -71,6 +77,9 @@ EXAMPLES:
   python tools/cron_tools/cron_edit.py "web-scraper" --dependency chrome_browser
   python tools/cron_tools/cron_edit.py "web-scraper" --clear-quiet-hours
   python tools/cron_tools/cron_edit.py "web-scraper" --clear-dependency
+  python tools/cron_tools/cron_edit.py "morning-brief" --topic-id 42
+  python tools/cron_tools/cron_edit.py "morning-brief" --chat-id -1001234567890 --clear-topic-id
+  python tools/cron_tools/cron_edit.py "reindex-nightly" --silent-on-success
 """
 
 
@@ -122,6 +131,26 @@ def _parse_args() -> argparse.Namespace:
         help="Resource dependency (e.g. 'chrome_browser'). Jobs with same dependency run sequentially.",
     )
     parser.add_argument(
+        "--chat-id",
+        type=int,
+        help="Redirect delivery to this chat ID.",
+    )
+    parser.add_argument(
+        "--topic-id",
+        type=int,
+        help="Redirect delivery to this forum topic (thread) ID.",
+    )
+    parser.add_argument(
+        "--transport",
+        choices=["tg", "mx"],
+        help="Delivery transport: 'tg' (Telegram) or 'mx' (Matrix).",
+    )
+    parser.add_argument(
+        "--clear-topic-id",
+        action="store_true",
+        help="Route to the chat's main thread instead of a specific topic.",
+    )
+    parser.add_argument(
         "--clear-quiet-hours",
         action="store_true",
         help="Remove quiet hour settings (use global config).",
@@ -154,6 +183,17 @@ def _parse_args() -> argparse.Namespace:
     enabled_group = parser.add_mutually_exclusive_group()
     enabled_group.add_argument("--enable", action="store_true", help="Enable the job")
     enabled_group.add_argument("--disable", action="store_true", help="Disable the job")
+    silent_group = parser.add_mutually_exclusive_group()
+    silent_group.add_argument(
+        "--silent-on-success",
+        action="store_true",
+        help="Suppress the Telegram push on success (errors are still delivered).",
+    )
+    silent_group.add_argument(
+        "--no-silent-on-success",
+        action="store_true",
+        help="Always deliver results, even on success (default).",
+    )
     return parser.parse_args()
 
 
@@ -281,6 +321,30 @@ def _apply_updates(args: argparse.Namespace, job: dict[str, Any]) -> tuple[list[
             job["dependency"] = dep_val
             updated_fields.append("dependency")
 
+    if args.chat_id is not None and job.get("chat_id") != args.chat_id:
+        job["chat_id"] = args.chat_id
+        updated_fields.append("chat_id")
+
+    if args.topic_id is not None and job.get("topic_id") != args.topic_id:
+        job["topic_id"] = args.topic_id
+        updated_fields.append("topic_id")
+
+    if args.transport is not None and job.get("transport") != args.transport:
+        job["transport"] = args.transport
+        updated_fields.append("transport")
+
+    if args.clear_topic_id and job.get("topic_id") is not None:
+        job["topic_id"] = None
+        updated_fields.append("topic_id (cleared)")
+
+    if args.silent_on_success and not job.get("silent_on_success", False):
+        job["silent_on_success"] = True
+        updated_fields.append("silent_on_success")
+
+    if args.no_silent_on_success and job.get("silent_on_success", False):
+        job["silent_on_success"] = False
+        updated_fields.append("silent_on_success")
+
     if args.clear_quiet_hours:
         if "quiet_start" in job or "quiet_end" in job:
             job.pop("quiet_start", None)
@@ -343,6 +407,10 @@ def main() -> None:
             args.quiet_start is not None,
             args.quiet_end is not None,
             args.dependency is not None,
+            args.chat_id is not None,
+            args.topic_id is not None,
+            args.transport is not None,
+            args.clear_topic_id,
             args.clear_quiet_hours,
             args.clear_provider,
             args.clear_model,
@@ -351,6 +419,8 @@ def main() -> None:
             args.clear_dependency,
             args.enable,
             args.disable,
+            args.silent_on_success,
+            args.no_silent_on_success,
         ]
     )
     if not has_changes:

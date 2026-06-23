@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 from shutil import which
 
+from ductor_bot.infra.platform import CREATION_FLAGS as _CREATION_FLAGS
 from ductor_bot.infra.platform import is_windows
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ def find_gemini_cli_js() -> str | None:
                 text=True,
                 encoding="utf-8",
                 stderr=subprocess.DEVNULL,
+                creationflags=_CREATION_FLAGS,
             ).strip()
             candidate = _gemini_index_from_node_modules_root(Path(root))
             if candidate.is_file():
@@ -181,6 +183,7 @@ def _npm_global_root() -> Path | None:
             text=True,
             encoding="utf-8",
             stderr=subprocess.DEVNULL,
+            creationflags=_CREATION_FLAGS,
         ).strip()
     except (subprocess.SubprocessError, OSError):
         return None
@@ -327,6 +330,7 @@ def _discover_models_via_node(models_js: Path) -> frozenset[str]:
             text=True,
             encoding="utf-8",
             stderr=subprocess.DEVNULL,
+            creationflags=_CREATION_FLAGS,
         ).strip()
     except (subprocess.SubprocessError, OSError):
         return frozenset()

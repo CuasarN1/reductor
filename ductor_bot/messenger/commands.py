@@ -35,6 +35,7 @@ ORCHESTRATOR_COMMANDS: frozenset[str] = frozenset(
         "upgrade",
         "sessions",
         "tasks",
+        "reset",
     }
 )
 

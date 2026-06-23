@@ -1,6 +1,6 @@
 """Internal localhost HTTP API bridging CLI subprocesses to the InterAgentBus and TaskHub.
 
-CLI subprocesses (claude, codex, gemini) run as separate OS processes and
+CLI subprocesses (claude, codex, gemini, agy) run as separate OS processes and
 cannot access in-memory objects directly. This lightweight aiohttp server
 exposes endpoints on localhost only, so tool scripts like ``ask_agent.py``,
 ``ask_agent_async.py``, ``create_task.py``, and ``ask_parent.py`` can

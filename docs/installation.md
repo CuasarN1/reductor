@@ -44,7 +44,7 @@ ductor
 
 On first run, onboarding does:
 
-- checks Claude/Codex/Gemini auth status,
+- checks Claude/Codex/Gemini/Antigravity auth status,
 - asks which transport to use (Telegram or Matrix),
 - collects transport credentials,
 - asks timezone,

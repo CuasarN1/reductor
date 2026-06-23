@@ -1,6 +1,6 @@
 # ductor Docs
 
-ductor routes chat input to official provider CLIs (`claude`, `codex`, `gemini`), streams responses back via Telegram or Matrix, persists session state, and runs cron/heartbeat/webhook/cleanup automation in-process. It also supports a direct WebSocket API transport with authenticated file upload/download.
+ductor routes chat input to official provider CLIs (`claude`, `codex`, `gemini`, `agy`), streams responses back via Telegram or Matrix, persists session state, and runs cron/heartbeat/webhook/cleanup automation in-process. It also supports a direct WebSocket API transport with authenticated file upload/download.
 
 ## Onboarding (Read in This Order)
 
@@ -35,7 +35,7 @@ ductor routes chat input to official provider CLIs (`claude`, `codex`, `gemini`)
 - `ductor_bot/session/`: provider-isolated session state keyed by `SessionKey(transport, chat_id, topic_id)` plus named-session registry.
 - `ductor_bot/tasks/`: shared background task delegation (`TaskHub`) and persistent task registry.
 - `ductor_bot/api/`: WebSocket ingress (`/ws`) and HTTP file endpoints (`/files`, `/upload`).
-- `ductor_bot/cli/`: Claude/Codex/Gemini wrappers, stream-event normalization, auth checks, model caches, process registry.
+- `ductor_bot/cli/`: Claude/Codex/Gemini/Antigravity wrappers, stream-event normalization, auth checks, model caches, process registry.
 - `ductor_bot/cron/`, `webhook/`, `heartbeat/`, `cleanup/`: in-process automation observers.
 - `ductor_bot/workspace/`: path source-of-truth, home defaults sync, rules deployment/sync, skill sync.
 - `ductor_bot/multiagent/`: supervisor, inter-agent bus, internal localhost API bridge, shared-knowledge sync.
@@ -45,6 +45,7 @@ ductor routes chat input to official provider CLIs (`claude`, `codex`, `gemini`)
 Runtime behavior notes:
 
 - `/new` is a factory reset for the active `SessionKey`: it clears the configured default-provider bucket for that chat/topic and leaves other provider buckets intact.
+- `/reset` clears the currently active provider bucket for that chat/topic.
 - Forum topics are isolated: each topic has its own transport-aware `SessionKey(...)` state.
 - Normal CLI errors do not auto-reset sessions; context is preserved unless explicit reset/recovery path applies.
 - Startup can recover interrupted foreground turns and safely resume eligible named sessions.

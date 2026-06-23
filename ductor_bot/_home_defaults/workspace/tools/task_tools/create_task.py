@@ -10,7 +10,7 @@ Usage:
 
 Options:
     --name NAME        Human-readable task name (e.g. "Flugsuche Paris")
-    --provider PROV    Override provider (claude, codex, gemini)
+    --provider PROV    Override provider (claude, codex, gemini, antigravity)
     --model MODEL      Override model (opus, sonnet, flash, etc.)
     --thinking LEVEL   Reasoning effort for codex (low, medium, high)
     --priority LEVEL   Scheduling priority (interactive|background|batch)
@@ -78,7 +78,7 @@ def main() -> None:
 
     if not args:
         print(
-            'Usage: python3 create_task.py [--name NAME] [--provider P] '
+            "Usage: python3 create_task.py [--name NAME] [--provider P] "
             '[--model M] [--thinking L] [--priority LEVEL] "prompt"',
             file=sys.stderr,
         )

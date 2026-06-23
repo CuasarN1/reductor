@@ -15,7 +15,10 @@ Scripts for creating, editing, listing, and removing scheduled jobs.
    - **If Claude:**
      - `haiku` - Fast and cost-effective
      - `sonnet` - Balanced performance (recommended)
+     - `sonnet[1m]` - Sonnet with Claude Code 1M-context beta
      - `opus` - Most capable, highest quality
+     - `opus[1m]` - Opus with Claude Code 1M-context beta
+     - `fable` - Latest Fable alias when supported by Claude Code
    - **If Codex:**
      - `gpt-5.4` - Latest frontier agentic coding model (recommended)
      - `gpt-5.4-mini` - Smaller, faster frontier coding model

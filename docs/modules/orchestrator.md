@@ -37,7 +37,7 @@ High-level steps:
 3. runtime environment injection into workspace rule files
 4. instantiate `Orchestrator` (sessions, CLI service, hook registry, optional memory flusher)
 5. provider auth detection + available-provider update
-6. initialize Gemini/Codex cache observers
+6. initialize Gemini/Antigravity/Codex cache observers
 7. initialize/start task observers (`Background`, `Cron`, `Webhook`) + `Heartbeat` + `Cleanup`
 8. start rule/skill watcher tasks
 9. optional API server startup
@@ -72,10 +72,12 @@ Common path:
 
 Registered command handlers:
 
-- `/new`, `/status`, `/model`, `/memory`, `/cron`, `/diagnose`, `/upgrade`, `/sessions`, `/tasks`
+- `/new`, `/reset`, `/status`, `/model`, `/memory`, `/cron`, `/diagnose`, `/upgrade`, `/sessions`, `/tasks`
 
 `/new` resets only the currently configured provider bucket for the active `SessionKey`.
 Other provider buckets for the same chat/topic remain intact.
+
+`/reset` resets the currently active provider bucket for the active `SessionKey`.
 
 `/model` never blocks: it always executes immediately (bypasses the sequential queue) and shows current model info if a CLI process is active in the chat.
 
@@ -98,7 +100,7 @@ Responsibilities:
 
 Directive resolution supports:
 
-- provider directives (`@codex`, `@gemini`, `@claude`)
+- provider directives (`@codex`, `@gemini`, `@claude`, `@antigravity`)
 - model directives (`@opus`, `@flash`, cache-backed IDs)
 
 ## Selector subsystem (`orchestrator/selectors/`)
@@ -170,7 +172,7 @@ Inter-agent ingress also lives in `injection.py`:
 Observer manager owns lifecycle for:
 
 - background, cron, webhook, heartbeat, cleanup
-- Gemini/Codex cache observers
+- Gemini/Antigravity/Codex cache observers
 - config reloader
 - rule sync watcher
 - skill sync watcher

@@ -158,3 +158,19 @@ def test_cron_add_no_venv_by_default(tmp_path: Path) -> None:
     assert result.returncode == 0
     task_dir = tmp_path / "workspace" / "cron_tasks" / "venv-test"
     assert not (task_dir / ".venv").exists()
+
+
+def test_cron_add_silent_on_success_flag(tmp_path: Path) -> None:
+    result = _run_tool(tmp_path, [*_full_args("silent-add"), "--silent-on-success"])
+    assert result.returncode == 0
+    data = json.loads((tmp_path / "cron_jobs.json").read_text())
+    job = next(j for j in data["jobs"] if j["id"] == "silent-add")
+    assert job["silent_on_success"] is True
+
+
+def test_cron_add_silent_on_success_defaults_off(tmp_path: Path) -> None:
+    result = _run_tool(tmp_path, _full_args("loud-add"))
+    assert result.returncode == 0
+    data = json.loads((tmp_path / "cron_jobs.json").read_text())
+    job = next(j for j in data["jobs"] if j["id"] == "loud-add")
+    assert job.get("silent_on_success", False) is False

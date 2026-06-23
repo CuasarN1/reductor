@@ -106,6 +106,7 @@ Changes take effect on the next CLI invocation (mtime-based cache invalidation, 
 | `scene` | `SceneConfig` | see below | Scene indicators and technical footer |
 | `notifications` | `NotificationsConfig` | see below | Targeted startup/upgrade notification routing |
 | `transcription` | `TranscriptionConfig` | see below | External audio/video transcription command hooks |
+| `skills` | `SkillsConfig` | see below | Cross-tool skill sync toggles (global + per-provider) |
 | `update_check` | `bool` | `true` | Enables periodic update observer (`UpdateObserver`) |
 | `interagent_port` | `int` | `8799` | Port for internal localhost API (`InternalAgentAPI`) |
 
@@ -145,6 +146,7 @@ Notes:
 | `claude` | `list[str]` | `[]` | Extra args appended to Claude CLI command |
 | `codex` | `list[str]` | `[]` | Extra args appended to Codex CLI command |
 | `gemini` | `list[str]` | `[]` | Extra args appended to Gemini CLI command |
+| `antigravity` | `list[str]` | `[]` | Extra args appended to Antigravity (`agy`) CLI command |
 
 Used by `CLIServiceConfig` for main-chat calls.
 
@@ -154,7 +156,7 @@ Argument shape note:
 
 Automation note:
 
-- cron/webhook `cron_task` runs use task-level `cli_parameters` from `cron_jobs.json` / `webhooks.json` (no merge with global `cli_parameters`).
+- cron/webhook `cron_task` runs merge global provider-specific `cli_parameters` first, then task-level `cli_parameters` from `cron_jobs.json` / `webhooks.json`.
 
 ## `TimeoutConfig`
 
@@ -480,6 +482,23 @@ Runtime note (`Orchestrator._start_api_server` + `ApiServer._authenticate`):
   - optional `channel_id` (positive int) for per-channel session isolation (`SessionKey.topic_id`),
 - clients can override only for that connection; persisted default stays in config.
 
+## `SkillsConfig`
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `sync_enabled` | `bool` | `true` | Global toggle for cross-tool skill sync; when `false`, `sync_skills` returns early and no sync runs |
+| `sync` | `SkillSyncProviders` | see below | Per-provider sync toggles |
+
+### `SkillSyncProviders`
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `claude` | `bool` | `true` | Include `~/.claude/skills` in cross-tool sync |
+| `codex` | `bool` | `true` | Include `~/.codex/skills` (or `$CODEX_HOME/skills`) in cross-tool sync |
+| `gemini` | `bool` | `true` | Include `~/.gemini/skills` in cross-tool sync |
+
+Toggles are read live from `config.json` on each skill-sync tick (independent of `ConfigReloader`), so changes take effect within one sync interval without restart. A disabled provider is dropped from the sync, so its skill dir is neither linked into nor used as a source; existing ductor-created links are not actively removed (cleared on shutdown cleanup or manually).
+
 ## Runtime hot-reload (`config_reload.py`)
 
 `Orchestrator.create()` starts `ConfigReloader`, which polls `config.json` every 5 seconds, validates it with `AgentConfig`, diffs top-level fields, and applies safe changes without restart.
@@ -516,12 +535,17 @@ Restart classification is computed from `AgentConfig` top-level schema fields.
 
 `ModelRegistry` (`ductor_bot/config.py`):
 
-- Claude models are hardcoded: `haiku`, `sonnet`, `opus`, plus the 1M-context variants `sonnet[1m]` and `opus[1m]` (Claude CLI strips the `[1m]` suffix and sets the 1M-context beta header internally).
+- Claude models are hardcoded: `haiku`, `sonnet`, `sonnet[1m]`, `opus`, `opus[1m]`, and `fable` (Claude CLI strips the `[1m]` suffix and sets the 1M-context beta header internally).
 - Gemini aliases are hardcoded: `auto`, `pro`, `flash`, `flash-lite`.
 - Runtime Gemini models are discovered from local Gemini CLI files at startup.
+- Antigravity has a built-in `antigravity-default` model and runtime model display names discovered from `agy models`.
+  The Telegram `/model` selector currently exposes only `antigravity-default`
+  because `agy` model selection is not reliable there; discovered display names
+  are still known to directives and API provider metadata.
 - Provider resolution (`provider_for(model_id)`):
-  - Claude when in `CLAUDE_MODELS`,
+  - Claude when in `CLAUDE_MODELS` or when model looks like `claude-*`,
   - Gemini when in aliases/discovered set or when model looks like `gemini-*`/`auto-gemini-*`,
+  - Antigravity when in the built-in/discovered set or when model looks like `antigravity-*`,
   - otherwise Codex.
 
 ## Timezone Resolution
@@ -571,6 +595,19 @@ Behavior:
 - startup load uses cached data when fresh and refreshes only when stale/missing,
 - refreshed hourly in background,
 - refresh callback updates runtime Gemini model registry (`set_gemini_models(...)`) used by directives and model selector.
+
+## Antigravity Model Cache
+
+Path: `~/.ductor/config/antigravity_models.json`.
+
+Behavior:
+
+- loaded at orchestrator startup (`AntigravityCacheObserver.start()`),
+- startup load uses cached data when fresh and refreshes only when stale/missing,
+- refreshed hourly in background,
+- refresh callback updates runtime Antigravity model registry (`set_antigravity_models(...)`) used by directives and API provider metadata.
+- the Telegram `/model` selector intentionally offers only `antigravity-default`
+  and displays the current `agy` model-selection limitation.
 
 ## `agents.json` (Multi-Agent Registry)
 

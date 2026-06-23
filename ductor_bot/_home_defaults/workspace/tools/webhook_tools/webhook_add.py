@@ -44,8 +44,8 @@ OPTIONAL:
                       Examples: "X-Hub-Signature-256" (GitHub), "Stripe-Signature" (Stripe).
 
 EXECUTION OVERRIDES (optional, for mode "cron_task"):
-  --provider          CLI provider: 'claude' or 'codex'
-  --model             Model name (e.g. 'opus', 'sonnet', 'gpt-5.2-codex')
+  --provider          CLI provider: 'claude', 'codex', or 'gemini'
+  --model             Model name (e.g. 'opus', 'sonnet', 'gpt-5.2-codex', 'gemini-2.5-pro')
   --reasoning-effort  Thinking level for Codex: 'low', 'medium', 'high', 'xhigh'
   --cli-parameters    Additional CLI flags as JSON array (e.g. '["--chrome"]')
 
@@ -232,8 +232,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--provider",
-        choices=["claude", "codex"],
-        help="CLI provider for this webhook (claude or codex). If omitted, uses global config.",
+        choices=["claude", "codex", "gemini"],
+        help=(
+            "CLI provider for this webhook (claude, codex, or gemini). "
+            "If omitted, uses global config."
+        ),
     )
     parser.add_argument(
         "--model",

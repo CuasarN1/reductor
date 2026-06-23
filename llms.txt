@@ -1,6 +1,6 @@
 # ductor
 
-> Multi-transport AI orchestration runtime (Telegram + Matrix) that executes official provider CLIs (`claude`, `codex`, `gemini`) as subprocesses, supports optional direct WebSocket API transport, streams responses, persists per-chat/provider state, and runs automation (cron, webhook, heartbeat, cleanup) in-process.
+> Multi-transport AI orchestration runtime (Telegram + Matrix) that executes official provider CLIs (`claude`, `codex`, `gemini`, `agy`) as subprocesses, supports optional direct WebSocket API transport, streams responses, persists per-chat/provider state, and runs automation (cron, webhook, heartbeat, cleanup) in-process.
 
 ductor is a Python service that routes user input to official CLI tools instead of SDK proxy layers. Core principle: keep runtime state inspectable and local (`~/.ductor/`) with JSON/Markdown files and minimal hidden state.
 
@@ -13,7 +13,7 @@ Telegram update / Matrix sync event / optional API message
   -> ingress layer (TelegramBot / MatrixBot / ApiServer /ws)
   -> Orchestrator (commands, directives, flows)
   -> CLIService (provider wrapper)
-  -> provider subprocess (claude/codex/gemini)
+  -> provider subprocess (claude/codex/gemini/agy)
   -> streamed/non-streamed output back to caller
 ```
 
@@ -28,7 +28,8 @@ Runtime supervision model:
 
 - Sessions are provider-isolated per transport-aware `SessionKey(transport, chat_id, topic_id)`.
 - `sessions.json` now stores transport-prefixed keys such as `tg:<chat_id>` / `mx:<room-int>` / `api:<chat_id>:<channel_id>` while still parsing legacy unprefixed keys.
-- `/new` resets only the active provider bucket.
+- `/new` resets the configured default-provider bucket.
+- `/reset` resets the currently active provider bucket.
 - `/stop` aborts local active work and drains pending queue.
 - `/stop_all` on main agent aborts active work across all agents (sub-agent fallback is local-only).
 - `/tasks` opens delegated background-task management for the current chat.
@@ -82,7 +83,7 @@ Sub-agent homes live under `~/.ductor/agents/<name>/` with their own config/sess
 - Webhook ingress (`webhooks.json`, modes: `wake`, `cron_task`)
 - Heartbeat observer
 - Cleanup observer
-- Codex/Gemini model cache observers
+- Codex/Gemini/Antigravity model cache observers
 - Config hot-reloader
 - Rule-sync and skill-sync watchers
 

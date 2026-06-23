@@ -16,6 +16,7 @@ Sync runs once during ``init_workspace`` and periodically as a background task.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import shutil
@@ -37,6 +38,30 @@ _SKIP_DIRS: frozenset[str] = frozenset(
 
 _SKILL_SYNC_INTERVAL = 30.0
 _MANAGED_MARKER = ".ductor_managed"
+_SYNCABLE_PROVIDERS: frozenset[str] = frozenset({"claude", "codex", "gemini"})
+
+
+def _load_skill_sync_config(config_path: Path) -> tuple[bool, frozenset[str]]:
+    """Read skill-sync toggles from config.json (#141).
+
+    Returns ``(sync_enabled, enabled_providers)``. Defaults to fully enabled
+    when the file is absent, unreadable, or omits the ``skills`` block, so
+    existing installs keep their current behavior. Read live on every sync so
+    config hot-reload takes effect on the next tick.
+    """
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return True, _SYNCABLE_PROVIDERS
+    skills = data.get("skills") if isinstance(data, dict) else None
+    if not isinstance(skills, dict):
+        return True, _SYNCABLE_PROVIDERS
+    sync = skills.get("sync")
+    if isinstance(sync, dict):
+        enabled_providers = frozenset(p for p in _SYNCABLE_PROVIDERS if sync.get(p, True))
+    else:
+        enabled_providers = _SYNCABLE_PROVIDERS
+    return bool(skills.get("sync_enabled", True)), enabled_providers
 
 
 def _is_under(child: Path, parent: Path) -> bool:
@@ -107,22 +132,26 @@ def _has_valid_skill_frontmatter(skill_dir: Path) -> bool:
     )
 
 
-def _cli_skill_dirs() -> dict[str, Path]:
+def _cli_skill_dirs(enabled_providers: frozenset[str] | None = None) -> dict[str, Path]:
     """Return skill directories for installed CLIs.
 
-    Only includes CLIs whose home directory exists on disk.
+    Only includes CLIs whose home directory exists on disk and whose sync is
+    enabled. ``enabled_providers=None`` (the default) means all providers.
     Uses the same detection pattern as ``cli/auth.py``.
     """
     dirs: dict[str, Path] = {}
-    claude_home = Path.home() / ".claude"
-    if claude_home.is_dir():
-        dirs["claude"] = claude_home / "skills"
-    codex_home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
-    if codex_home.is_dir():
-        dirs["codex"] = codex_home / "skills"
-    gemini_home = Path.home() / ".gemini"
-    if gemini_home.is_dir():
-        dirs["gemini"] = gemini_home / "skills"
+    if enabled_providers is None or "claude" in enabled_providers:
+        claude_home = Path.home() / ".claude"
+        if claude_home.is_dir():
+            dirs["claude"] = claude_home / "skills"
+    if enabled_providers is None or "codex" in enabled_providers:
+        codex_home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
+        if codex_home.is_dir():
+            dirs["codex"] = codex_home / "skills"
+    if enabled_providers is None or "gemini" in enabled_providers:
+        gemini_home = Path.home() / ".gemini"
+        if gemini_home.is_dir():
+            dirs["gemini"] = gemini_home / "skills"
     return dirs
 
 
@@ -336,8 +365,15 @@ def sync_skills(paths: DuctorPaths, *, docker_active: bool = False) -> None:
     - Real directories are never overwritten or removed.
     - Existing valid symlinks pointing elsewhere are left alone.
     - Internal directories (.system, .claude, .git, .venv) are skipped.
+
+    Honors the ``skills`` config block (#141): a global ``sync_enabled=false``
+    skips entirely, and per-provider toggles drop individual CLI directories.
     """
-    cli_dirs = _cli_skill_dirs()
+    sync_enabled, enabled_providers = _load_skill_sync_config(paths.config_path)
+    if not sync_enabled:
+        logger.debug("Cross-tool skill sync disabled via config; skipping")
+        return
+    cli_dirs = _cli_skill_dirs(enabled_providers)
     all_dirs: dict[str, Path] = {"ductor": paths.skills_dir, **cli_dirs}
 
     removed_invalid = _clean_invalid_workspace_skill_links(paths.skills_dir)

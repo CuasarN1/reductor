@@ -324,26 +324,26 @@ class TestCronJobTransport:
 
 
 class TestExecutorTransportEnv:
-    def test_build_subprocess_env_includes_transport(self) -> None:
-        """_build_subprocess_env sets DUCTOR_TRANSPORT from CLIConfig."""
+    def testbuild_subprocess_env_includes_transport(self) -> None:
+        """build_subprocess_env sets DUCTOR_TRANSPORT from CLIConfig."""
         from ductor_bot.cli.base import CLIConfig
-        from ductor_bot.cli.executor import _build_subprocess_env
+        from ductor_bot.cli.executor import build_subprocess_env
 
         config = CLIConfig(
             working_dir="/tmp",
             chat_id=123,
             transport="mx",
         )
-        env = _build_subprocess_env(config)
+        env = build_subprocess_env(config)
         assert env is not None
         assert env["DUCTOR_TRANSPORT"] == "mx"
 
-    def test_build_subprocess_env_default_transport(self) -> None:
-        """_build_subprocess_env defaults DUCTOR_TRANSPORT to 'tg'."""
+    def testbuild_subprocess_env_default_transport(self) -> None:
+        """build_subprocess_env defaults DUCTOR_TRANSPORT to 'tg'."""
         from ductor_bot.cli.base import CLIConfig
-        from ductor_bot.cli.executor import _build_subprocess_env
+        from ductor_bot.cli.executor import build_subprocess_env
 
         config = CLIConfig(working_dir="/tmp", chat_id=123)
-        env = _build_subprocess_env(config)
+        env = build_subprocess_env(config)
         assert env is not None
         assert env["DUCTOR_TRANSPORT"] == "tg"

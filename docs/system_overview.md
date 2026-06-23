@@ -21,7 +21,7 @@ Each agent stack contains:
   multiple entries)
 - `Orchestrator` (routing + flows)
 - `CLIService` (provider wrappers)
-- provider subprocesses (`claude`, `codex`, `gemini`)
+- provider subprocesses (`claude`, `codex`, `gemini`, `agy`)
 
 ## 2) Primary message path
 
@@ -41,6 +41,7 @@ Notes:
 
 - `/stop` and `/stop_all` are middleware/bot-level abort paths (not orchestrator command dispatch).
 - `/new` resets the configured default-provider bucket for the active session key.
+- `/reset` resets the currently active provider bucket for the active session key.
 - Telegram groups: both `allowed_group_ids` and `allowed_user_ids` must allow the message.
 - `group_mention_only` behavior differs by transport:
   - Telegram: mention/reply gating only (no auth bypass)
@@ -148,7 +149,7 @@ Sub-agent home: `~/.ductor/agents/<name>/` with its own config/workspace/session
 
 Chat commands (Telegram and Matrix):
 
-- `/new`, `/stop`, `/stop_all`, `/interrupt`, `/model`, `/status`, `/memory`, `/session`, `/sessions`, `/tasks`, `/cron`, `/diagnose`, `/upgrade`
+- `/new`, `/reset`, `/stop`, `/stop_all`, `/interrupt`, `/model`, `/status`, `/memory`, `/session`, `/sessions`, `/tasks`, `/cron`, `/showfiles`, `/info`, `/help`, `/diagnose`, `/upgrade`
 - Telegram-only utility commands: `/where`, `/leave` (work but are not in command popup)
 - Matrix uses `!` prefix by default (e.g. `!help`, `!status`); `/` also works but may conflict with Element's built-in commands
 

@@ -22,6 +22,11 @@ def create_cli(config: CLIConfig) -> BaseCLI:
 
         return CodexCLI(config)
 
+    if config.provider == "antigravity":
+        from ductor_bot.cli.antigravity_provider import AntigravityCLI
+
+        return AntigravityCLI(config)
+
     from ductor_bot.cli.claude_provider import ClaudeCodeCLI
 
     return ClaudeCodeCLI(config)

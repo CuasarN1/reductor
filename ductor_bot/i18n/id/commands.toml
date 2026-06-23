@@ -2,6 +2,7 @@
 
 [bot]
 new = "Mulai obrolan baru"
+reset = "Reset chat ini"
 stop = "Hentikan + kosongkan antrean"
 interrupt = "Interupsi + simpan"
 model = "Tampilkan/ganti model"

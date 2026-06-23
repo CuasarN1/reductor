@@ -5,10 +5,13 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import subprocess
 import time
 from pathlib import Path
 
 from ductor_bot.infra.atomic_io import atomic_bytes_save
+from ductor_bot.infra.platform import CREATION_FLAGS as _CREATION_FLAGS
+from ductor_bot.infra.platform import is_windows
 from ductor_bot.infra.process_tree import (
     force_kill_process_tree,
     list_process_descendants,
@@ -23,6 +26,35 @@ _KILL_POLL_INTERVAL = 0.2
 
 def _is_process_alive(pid: int) -> bool:
     """Check if a process with the given PID is still running."""
+    if pid <= 0:
+        return False
+    if is_windows():
+        return _is_process_alive_windows(pid)
+    return _is_process_alive_posix(pid)
+
+
+def _is_process_alive_windows(pid: int) -> bool:
+    """Check process liveness via tasklist.
+
+    os.kill(pid, 0) is unsafe here: on Windows any signal other than
+    CTRL_C_EVENT/CTRL_BREAK_EVENT terminates the target process.
+    """
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+            creationflags=_CREATION_FLAGS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return f'"{pid}"' in result.stdout
+
+
+def _is_process_alive_posix(pid: int) -> bool:
+    """Check process liveness with POSIX signal 0 semantics."""
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -30,7 +62,6 @@ def _is_process_alive(pid: int) -> bool:
     except PermissionError:
         return True
     except OSError:
-        # Windows raises various OSError subclasses for invalid/stale PIDs.
         return False
     return True
 

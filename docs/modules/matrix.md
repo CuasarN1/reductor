@@ -68,7 +68,7 @@ Matrix lacks inline keyboards. Workaround:
 
 Same command set as Telegram, with `!` or `/` prefix:
 
-- Transport-level: `!stop`, `!stop_all`, `!interrupt`, `!restart`, `!new`, `!help`, `!info`, `!session`, `!showfiles`, `!agent_commands`
+- Transport-level: `!stop`, `!stop_all`, `!interrupt`, `!restart`, `!new`, `!reset`, `!help`, `!info`, `!session`, `!showfiles`, `!agent_commands`
 - Orchestrator-routed: `!status`, `!model`, `!memory`, `!cron`, `!diagnose`, `!upgrade`, `!sessions`, `!tasks`
 - Main-agent only: `!agents`, `!agent_start`, `!agent_stop`, `!agent_restart`
 

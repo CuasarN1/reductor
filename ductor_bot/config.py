@@ -229,6 +229,7 @@ class CLIParametersConfig(BaseModel):
     claude: list[str] = Field(default_factory=list)
     codex: list[str] = Field(default_factory=list)
     gemini: list[str] = Field(default_factory=list)
+    antigravity: list[str] = Field(default_factory=list)
 
 
 class MatrixConfig(BaseModel):
@@ -379,6 +380,12 @@ def update_config_file(config_path: Path, **updates: object) -> None:
     from ductor_bot.infra.json_store import atomic_json_save
 
     data: dict[str, object] = json.loads(config_path.read_text(encoding="utf-8"))
+    if all(data.get(key) == value for key, value in updates.items()):
+        logger.debug(
+            "Skipped config update with unchanged values: %s",
+            ", ".join(f"{k}={v}" for k, v in updates.items()),
+        )
+        return
     data.update(updates)
     atomic_json_save(config_path, data)
     logger.info("Persisted config update: %s", ", ".join(f"{k}={v}" for k, v in updates.items()))
@@ -389,6 +396,26 @@ async def update_config_file_async(config_path: Path, **updates: object) -> None
     import asyncio
 
     await asyncio.to_thread(update_config_file, config_path, **updates)
+
+
+class SkillSyncProviders(BaseModel):
+    """Per-provider cross-tool skill sync toggles (#141)."""
+
+    claude: bool = True
+    codex: bool = True
+    gemini: bool = True
+
+
+class SkillsConfig(BaseModel):
+    """Cross-tool skill sync configuration.
+
+    ``sync_enabled`` is the global switch; ``sync`` allows opting out of
+    individual provider skill directories (e.g. ``~/.codex/skills``) while
+    keeping the shared workflow for the others.
+    """
+
+    sync_enabled: bool = True
+    sync: SkillSyncProviders = Field(default_factory=SkillSyncProviders)
 
 
 class AgentConfig(BaseModel):
@@ -427,6 +454,7 @@ class AgentConfig(BaseModel):
     scene: SceneConfig = Field(default_factory=SceneConfig)
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
     user_timezone: str = ""
     language: str = "en"
     update_check: bool = True
@@ -560,13 +588,21 @@ CLAUDE_MODELS_ORDERED: tuple[str, ...] = (
     "sonnet[1m]",
     "opus",
     "opus[1m]",
+    # Claude Code >= 2.1.172 resolves the "fable" alias to the latest Fable
+    # model (same auto-tracking as the opus/sonnet aliases).
+    "fable",
 )
 CLAUDE_MODELS: frozenset[str] = frozenset(CLAUDE_MODELS_ORDERED)
 
 # "auto" is a Gemini-specific alias (Gemini CLI auto-selects the best model).
 _GEMINI_ALIASES: frozenset[str] = frozenset({"auto", "pro", "flash", "flash-lite"})
 
+# Antigravity currently exposes a provider-level default through its CLI bridge.
+ANTIGRAVITY_MODELS_ORDERED: tuple[str, ...] = ("antigravity-default",)
+ANTIGRAVITY_MODELS: frozenset[str] = frozenset(ANTIGRAVITY_MODELS_ORDERED)
+
 _runtime_gemini: list[frozenset[str]] = [frozenset()]
+_runtime_antigravity: list[frozenset[str]] = [frozenset()]
 
 
 class ModelRegistry:
@@ -579,8 +615,13 @@ class ModelRegistry:
 
     @staticmethod
     def provider_for(model_id: str) -> str:
-        """Return the provider for a model ID."""
-        if model_id in CLAUDE_MODELS:
+        """Return the provider for a model ID.
+
+        Claude Code accepts both the short aliases in ``CLAUDE_MODELS`` and
+        full model IDs (``claude-opus-4-7``), so any ``claude-`` prefix
+        routes to Claude.
+        """
+        if model_id in CLAUDE_MODELS or model_id.startswith("claude-"):
             return "claude"
         if (
             model_id in _GEMINI_ALIASES
@@ -588,6 +629,12 @@ class ModelRegistry:
             or model_id.startswith(("gemini-", "auto-gemini-"))
         ):
             return "gemini"
+        if (
+            model_id in ANTIGRAVITY_MODELS
+            or model_id in _runtime_antigravity[0]
+            or model_id.startswith("antigravity-")
+        ):
+            return "antigravity"
         return "codex"
 
 
@@ -609,3 +656,23 @@ def set_gemini_models(models: frozenset[str]) -> None:
 def reset_gemini_models() -> None:
     """Clear runtime Gemini models. For test teardown only."""
     _runtime_gemini[0] = frozenset()
+
+
+def get_antigravity_models() -> frozenset[str]:
+    """Return dynamically discovered Antigravity models (may be empty)."""
+    return _runtime_antigravity[0]
+
+
+def set_antigravity_models(models: frozenset[str]) -> None:
+    """Set runtime Antigravity models discovered from ``agy models``.
+
+    Refuses to overwrite with an empty set to prevent cache wipe.
+    """
+    if not models:
+        return
+    _runtime_antigravity[0] = models
+
+
+def reset_antigravity_models() -> None:
+    """Clear runtime Antigravity models. For test teardown only."""
+    _runtime_antigravity[0] = frozenset()

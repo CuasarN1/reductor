@@ -13,6 +13,8 @@ if TYPE_CHECKING:
 
 from ductor_bot.config import _GEMINI_ALIASES, CLAUDE_MODELS, get_gemini_models
 
+_TASK_PROVIDERS: frozenset[str] = frozenset({"claude", "codex", "gemini"})
+
 
 def _looks_like_gemini_model(model: str) -> bool:
     return model.startswith(("gemini-", "auto-gemini-"))
@@ -31,6 +33,15 @@ def _validate_gemini_model(model: str) -> None:
             "(e.g. gemini-2.5-pro) or Gemini alias."
         )
         raise DuctorError(msg)
+
+
+def _validate_task_provider(provider: str) -> None:
+    if provider in _TASK_PROVIDERS:
+        return
+
+    supported = ", ".join(sorted(_TASK_PROVIDERS))
+    msg = f"Unsupported task provider: {provider}. Supported providers: {supported}"
+    raise DuctorError(msg)
 
 
 @dataclass(frozen=True)
@@ -87,6 +98,7 @@ def resolve_cli_config(
 
     # 1. Resolve provider
     provider = overrides.provider or base_config.provider
+    _validate_task_provider(provider)
 
     # 2. Resolve model
     model = overrides.model or base_config.model
@@ -133,9 +145,9 @@ def resolve_cli_config(
     # 5. Merge CLI parameters: base per-provider bucket first, task overrides second.
     #    argparse-style resolution — last flag wins at the CLI level.
     #    `base_config.cli_parameters` is a CLIParametersConfig BaseModel with
-    #    per-provider fields (.claude, .codex, .gemini). Mirrors the foreground
-    #    pattern in orchestrator/core.py:142-144. getattr+None fallback keeps this
-    #    forward-compatible if a new provider is added without a matching bucket.
+    #    per-provider fields. Mirrors the foreground pattern in orchestrator/core.py.
+    #    getattr+None fallback keeps this forward-compatible if a new provider is
+    #    added without a matching bucket.
     base_params = getattr(base_config.cli_parameters, provider, None) or []
     cli_parameters = [*base_params, *overrides.cli_parameters]
 

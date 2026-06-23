@@ -408,13 +408,16 @@ class CronObserver(BaseTaskObserver):
         # cancels) running tasks.  Delivering first guarantees the
         # Telegram message is sent even if the task is cancelled during
         # the subsequent file I/O.
-        await self._deliver_result(
-            job_id,
-            job_title,
-            result.result_text,
-            result.status,
-            routing,
-        )
+        if job and job.silent_on_success and result.status == "success":
+            logger.info("Cron job %s succeeded silently (silent_on_success)", job_title)
+        else:
+            await self._deliver_result(
+                job_id,
+                job_title,
+                result.result_text,
+                result.status,
+                routing,
+            )
 
         self._manager.update_run_status(job_id, status=result.status)
         # Refresh our mtime baseline so the file-watcher doesn't treat the

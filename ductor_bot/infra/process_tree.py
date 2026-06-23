@@ -9,6 +9,8 @@ import signal
 import subprocess
 import sys
 
+from ductor_bot.infra.platform import CREATION_FLAGS as _CREATION_FLAGS
+
 logger = logging.getLogger(__name__)
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -108,6 +110,7 @@ def _run_taskkill(pid: int, *, force: bool) -> None:
             capture_output=True,
             check=False,
             timeout=_TASKKILL_TIMEOUT_SECONDS,
+            creationflags=_CREATION_FLAGS,
         )
 
 
@@ -152,6 +155,7 @@ def _kill_ductor_exe_windows(current_pid: int) -> int:
             text=True,
             check=False,
             timeout=_TASKKILL_TIMEOUT_SECONDS,
+            creationflags=_CREATION_FLAGS,
         )
     except (OSError, subprocess.TimeoutExpired):
         return 0
@@ -197,6 +201,7 @@ def _kill_venv_python_windows(current_pid: int) -> int:
             text=True,
             check=False,
             timeout=10,
+            creationflags=_CREATION_FLAGS,
         )
     except (OSError, subprocess.TimeoutExpired):
         return 0

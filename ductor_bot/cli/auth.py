@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -12,8 +13,10 @@ from enum import StrEnum, unique
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ductor_bot.cli.antigravity_runtime import antigravity_process_env
 from ductor_bot.cli.gemini_utils import find_gemini_cli
 from ductor_bot.config import NULLISH_TEXT_VALUES
+from ductor_bot.infra.platform import CREATION_FLAGS as _CREATION_FLAGS
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -115,13 +118,17 @@ def check_claude_auth() -> AuthResult:
 
 def _claude_cli_logged_in() -> bool:
     """Run ``claude auth status`` and return True when the CLI reports logged-in."""
+    # Resolve the executable so the npm shim (claude.cmd on Windows) is found; a
+    # bare "claude" raises FileNotFoundError there, so OAuth auth is missed (#149).
+    claude_cli = shutil.which("claude") or "claude"
     try:
         proc = subprocess.run(
-            ["claude", "auth", "status"],
+            [claude_cli, "auth", "status"],
             capture_output=True,
             text=True,
             timeout=10,
             check=False,
+            creationflags=_CREATION_FLAGS,
         )
         data = json.loads(proc.stdout)
         return data.get("loggedIn") is True
@@ -402,10 +409,51 @@ def _normalize_key_like_value(raw: str) -> str:
     return value
 
 
+def _antigravity_cli_logged_in() -> bool:
+    # Resolve the executable so the npm shim (agy.cmd on Windows) is found; a
+    # bare "agy" raises FileNotFoundError there, so OAuth auth is missed (#149).
+    agy_cli = shutil.which("agy") or "agy"
+    try:
+        result = subprocess.run(
+            [agy_cli, "models"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            env=antigravity_process_env(),
+            creationflags=_CREATION_FLAGS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.debug("Antigravity CLI auth probe failed: %s", exc)
+        return False
+
+    output = f"{result.stdout}\n{result.stderr}".lower()
+    if "sign in" in output or "not logged in" in output or "login" in output:
+        return False
+    return result.returncode == 0
+
+
+def check_antigravity_auth() -> AuthResult:
+    """Check if Antigravity CLI (agy) is installed and configured."""
+    binary = shutil.which("agy")
+    if binary is not None and _antigravity_cli_logged_in():
+        logger.debug("Auth check provider=antigravity status=AUTHENTICATED (agy models)")
+        return AuthResult(provider="antigravity", status=AuthStatus.AUTHENTICATED)
+
+    ccs_settings = Path.home() / ".ccs" / "agy.settings.json"
+    if binary is not None or ccs_settings.is_file():
+        logger.debug("Auth check provider=antigravity status=INSTALLED")
+        return AuthResult(provider="antigravity", status=AuthStatus.INSTALLED)
+
+    logger.debug("Auth check provider=antigravity status=NOT_FOUND")
+    return AuthResult(provider="antigravity", status=AuthStatus.NOT_FOUND)
+
+
 _CHECKERS: dict[str, Callable[[], AuthResult]] = {
     "claude": check_claude_auth,
     "codex": check_codex_auth,
     "gemini": check_gemini_auth,
+    "antigravity": check_antigravity_auth,
 }
 
 

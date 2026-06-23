@@ -1,12 +1,12 @@
 # cli/
 
-Provider-agnostic CLI execution layer for Claude Code, Codex, and Gemini.
+Provider-agnostic CLI execution layer for Claude Code, Codex, Gemini, and Antigravity.
 
 ## Files
 
 - `types.py`: `AgentRequest`, `AgentResponse`, `CLIResponse`
 - `base.py`: `BaseCLI`, `CLIConfig`, `docker_wrap()`, Windows helpers
-- `factory.py`: provider factory (`claude` / `codex` / `gemini`)
+- `factory.py`: provider factory (`claude` / `codex` / `gemini` / `antigravity`)
 - `service.py`: `CLIService` gateway for orchestrator
 - `init_wizard.py`: interactive onboarding and smart reset flow
 - `executor.py`: shared subprocess lifecycle helpers for provider wrappers
@@ -15,17 +15,21 @@ Provider-agnostic CLI execution layer for Claude Code, Codex, and Gemini.
 - `claude_provider.py`: Claude subprocess wrapper
 - `codex_provider.py`: Codex subprocess wrapper
 - `gemini_provider.py`: Gemini subprocess wrapper
+- `antigravity_provider.py`: Antigravity (`agy`) subprocess wrapper — always runs on the host, even with the Docker sandbox enabled (the sandbox image ships no `agy` binary or auth state). `agy` has no headless streaming mode (`--print` is one-shot; `--prompt-interactive` needs a TTY), so `send_streaming` reuses the `--print` path. Because `agy --print` silently drops stdout in non-TTY subprocesses (upstream bug `google-antigravity/antigravity-cli#76`), the answer is read back from agy's own transcript (`<home>/.gemini/antigravity-cli/brain/<conv-id>/.system_generated/logs/transcript.jsonl`, the final `PLANNER_RESPONSE` entry — clean, without tool-call narration), with stdout as fallback. `--print <prompt>` is placed last and adjacent (it consumes the next token as its prompt value), and agy is grounded in the per-agent workspace via `--add-dir`
 - `stream_events.py`: normalized stream events + Claude stream parser
 - `codex_events.py`: Codex JSONL parser
 - `gemini_events.py`: Gemini NDJSON + JSON parser
+- `antigravity_events.py`: Antigravity `--print` output parser (`parse_antigravity_json`)
 - `coalescer.py`: streaming text coalescing buffer used by bot streaming dispatch
 - `gemini_utils.py`: Gemini CLI discovery, trusted folder, model discovery helpers
 - `codex_discovery.py`: Codex model discovery via `codex app-server` JSON-RPC
+- `antigravity_discovery.py`: Antigravity model discovery via `agy models` (parses display names)
 - `process_registry.py`: subprocess tracking/abort/kill
 - `auth.py`: provider auth detection
 - `param_resolver.py`: task override resolution for cron/webhook one-shot runs
 - `codex_cache.py`, `codex_cache_observer.py`: Codex model cache + observer
 - `gemini_cache.py`, `gemini_cache_observer.py`: Gemini model cache + observer
+- `antigravity_cache.py`, `antigravity_cache_observer.py`: Antigravity model cache + observer (refreshes `~/.ductor/config/antigravity_models.json` from `agy models`, hourly)
 
 ## Execution path
 
@@ -62,6 +66,7 @@ Configured globally in `config.json`:
 - `cli_parameters.claude`
 - `cli_parameters.codex`
 - `cli_parameters.gemini`
+- `cli_parameters.antigravity`
 
 `CLIService` forwards them per provider.
 
@@ -71,12 +76,13 @@ Used by cron and webhook `cron_task` runs.
 
 - input: `TaskOverrides(provider, model, reasoning_effort, cli_parameters)`
 - output: immutable `TaskExecutionConfig`
+- supported one-shot providers: `claude`, `codex`, `gemini`
 - validation:
-  - Claude model in `haiku|sonnet|opus`
+  - Claude model in `CLAUDE_MODELS`
   - Codex model validated against `CodexModelCache`
   - Gemini model validated against aliases/discovered IDs or `gemini-*` patterns
 - Codex reasoning effort applied only when supported by model
-- task `cli_parameters` are task-level only (no merge with global provider args)
+- task `cli_parameters` are appended after the global provider-specific args
 
 ## Streaming model
 
@@ -176,6 +182,17 @@ Statuses: `AUTHENTICATED`, `INSTALLED`, `NOT_FOUND`.
 - loaded on startup (uses cache when fresh, refreshes when stale/missing)
 - hourly refresh loop
 - refresh callback updates runtime Gemini model registry (`set_gemini_models`)
+
+### Antigravity cache
+
+- file: `~/.ductor/config/antigravity_models.json`
+- discovery source: `discover_antigravity_models()` (`antigravity_discovery.py`) via `agy models`
+- loaded on startup (uses cache when fresh, refreshes when stale/missing)
+- hourly refresh loop
+- refresh callback updates runtime Antigravity model registry (`set_antigravity_models`)
+- the Telegram model selector currently offers only `antigravity-default` and
+  explains that `agy` model selection is not reliable there; discovered names
+  remain available for directive/API provider metadata.
 
 ## Process registry
 

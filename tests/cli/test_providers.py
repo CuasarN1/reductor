@@ -38,6 +38,7 @@ def test_docker_wrap_with_container(tmp_path: Path) -> None:
 
 def test_claude_build_command_basic(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("ductor_bot.cli.claude_provider.which", lambda _: "/usr/bin/claude")
+    monkeypatch.setattr("ductor_bot.cli.claude_provider._IS_WINDOWS", False)
     cfg = CLIConfig(provider="claude", model="opus", permission_mode="bypassPermissions")
     cli = ClaudeCodeCLI(cfg)
     cmd = cli._build_command("hello")

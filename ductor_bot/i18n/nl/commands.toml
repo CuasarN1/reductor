@@ -2,6 +2,7 @@
 
 [bot]
 new = "Nieuw gesprek"
+reset = "Chat resetten"
 stop = "Huidig + wachtrij stoppen"
 interrupt = "Onderbreken, wachtrij bewaren"
 model = "Model tonen/wisselen"

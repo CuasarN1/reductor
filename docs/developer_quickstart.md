@@ -12,7 +12,7 @@ pip install -e ".[dev]"
 
 Optional for full runtime validation:
 
-- install/auth at least one provider CLI (`claude`, `codex`, `gemini`)
+- install/auth at least one provider CLI (`claude`, `codex`, `gemini`, `agy`)
 - set up a messaging transport:
   - **Telegram**: bot token from @BotFather + user ID (`allowed_user_ids`)
   - **Matrix**: account on any homeserver (homeserver URL, user ID, password, `allowed_users`)
@@ -143,6 +143,7 @@ If API is wrong:
 
 - `/stop` and `/stop_all` are pre-routing abort paths in middleware/bot.
 - `/new` resets the configured default-provider bucket for the active `SessionKey`.
+- `/reset` resets the currently active provider bucket for the active `SessionKey`.
 - session identity is transport-aware: `SessionKey(transport, chat_id, topic_id)`.
 - `/model` inside a topic updates only that topic session (not global config).
 - task tools now support permanent single-task removal via `delete_task.py` (`/tasks/delete`).

@@ -40,8 +40,9 @@ class TestGenerateServiceUnit:
         with patch("ductor_bot.infra.service_linux.Path.home", return_value=tmp_path):
             unit = _generate_service_unit("ductor")
 
-        assert f"{tmp_path}/.nvm/versions/node/v24.0.0/bin" in unit
-        assert f"{tmp_path}/.nvm/versions/node/v22.0.0/bin" in unit
+        home = tmp_path.as_posix()
+        assert f"{home}/.nvm/versions/node/v24.0.0/bin" in unit
+        assert f"{home}/.nvm/versions/node/v22.0.0/bin" in unit
 
 
 class TestIsServiceAvailable:

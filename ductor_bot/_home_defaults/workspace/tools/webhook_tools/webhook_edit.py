@@ -38,7 +38,7 @@ OPTIONS:
   --hmac-sig-regex      Regex to extract signature (group 1)
   --hmac-payload-prefix-regex  Regex on header; group 1 prepended to body with "."
   --regenerate-token    Generate a new random Bearer token (bearer mode only)
-  --provider "..."      Change CLI provider (claude or codex)
+  --provider "..."      Change CLI provider (claude, codex, or gemini)
   --model "..."         Change model name
   --reasoning-effort    Change thinking level for Codex (low, medium, high, xhigh)
   --cli-parameters      Change CLI flags as JSON array
@@ -85,8 +85,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--provider",
-        choices=["claude", "codex"],
-        help="Change CLI provider (claude or codex)",
+        choices=["claude", "codex", "gemini"],
+        help="Change CLI provider (claude, codex, or gemini)",
     )
     parser.add_argument(
         "--model",

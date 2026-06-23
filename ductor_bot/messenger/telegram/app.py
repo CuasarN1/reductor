@@ -43,11 +43,13 @@ from ductor_bot.messenger.telegram.file_browser import (
 )
 from ductor_bot.messenger.telegram.formatting import markdown_to_telegram_html
 from ductor_bot.messenger.telegram.handlers import (
+    build_reply_prompt,
     handle_abort,
     handle_abort_all,
     handle_command,
     handle_interrupt,
     handle_new_session,
+    prepend_reply_to_media,
     strip_mention,
 )
 from ductor_bot.messenger.telegram.media import (
@@ -134,7 +136,8 @@ def _build_help_text() -> str:
     return fmt(
         t("help.header"),
         SEP,
-        f"{t('help.cat_daily')}\n{_help_line('new')}\n{_help_line('stop')}\n{_help_line('interrupt')}\n{_help_line('stop_all')}\n"
+        f"{t('help.cat_daily')}\n{_help_line('new')}\n{_help_line('reset')}\n{_help_line('stop')}\n"
+        f"{_help_line('interrupt')}\n{_help_line('stop_all')}\n"
         f"{_help_line('model')}\n{_help_line('status')}\n{_help_line('memory')}",
         f"{t('help.cat_automation')}\n{_help_line('session')}\n{_help_line('tasks')}\n{_help_line('cron')}",
         f"{t('help.cat_multiagent')}\n{_help_line('agent_commands')}",
@@ -417,7 +420,7 @@ class TelegramBot:
         r.message(Command("tasks", ignore_case=True))(self._on_tasks)
         r.message(Command("showfiles", ignore_case=True))(self._on_showfiles)
         r.message(Command("agent_commands", ignore_case=True))(self._on_agent_commands)
-        base_cmds = ["status", "memory", "model", "cron", "diagnose", "upgrade"]
+        base_cmds = ["status", "memory", "model", "cron", "diagnose", "upgrade", "reset"]
         if self._agent_name == "main":
             base_cmds += ["agents", "agent_start", "agent_stop", "agent_restart"]
         for cmd in base_cmds:
@@ -1427,12 +1430,16 @@ class TelegramBot:
 
         if has_media(message):
             paths = self._orch.paths
-            return await resolve_media_text(
+            media_prompt = await resolve_media_text(
                 self._bot, message, paths.telegram_files_dir, paths.workspace
             )
+            if media_prompt is None:
+                return None
+            return prepend_reply_to_media(message, media_prompt)
         if not message.text:
             return None
-        return strip_mention(message.text, self._bot_username)
+        text = strip_mention(message.text, self._bot_username)
+        return build_reply_prompt(message, text)
 
     async def _handle_streaming(
         self, message: Message, key: SessionKey, text: str, *, thread_id: int | None = None

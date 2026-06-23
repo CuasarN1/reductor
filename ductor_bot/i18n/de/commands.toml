@@ -2,6 +2,7 @@
 
 [bot]
 new = "Neuer Chat"
+reset = "Chat zurücksetzen"
 stop = "Aktuelles + Wartende stoppen"
 interrupt = "Unterbrechen, Queue behalten"
 model = "Modell anzeigen/wechseln"

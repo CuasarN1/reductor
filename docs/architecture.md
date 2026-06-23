@@ -96,7 +96,7 @@ Matrix startup follows a similar pattern (orchestrator creation, bus wiring, obs
 3. inject runtime environment note into workspace rule files
 4. instantiate `Orchestrator`
 5. check provider auth and apply provider availability
-6. initialize model cache observers (Gemini + Codex)
+6. initialize model cache observers (Gemini + Antigravity + Codex)
 7. initialize task observers (`BackgroundObserver`, `CronObserver`, `WebhookObserver`)
 8. start observers (`cron`, `heartbeat`, `webhook`, `cleanup`) + rule/skill watchers
 9. optional API server startup
@@ -106,18 +106,18 @@ Matrix startup follows a similar pattern (orchestrator creation, bus wiring, obs
 
 Bot-level handlers (`messenger/telegram/app.py`):
 
-- `/start`, `/help`, `/info`, `/showfiles`, `/stop`, `/stop_all`, `/interrupt`, `/restart`, `/new`, `/session`, `/sessions`, `/tasks`, `/agent_commands`
+- `/start`, `/help`, `/info`, `/showfiles`, `/stop`, `/stop_all`, `/interrupt`, `/restart`, `/new`, `/reset`, `/session`, `/sessions`, `/tasks`, `/agent_commands`
 - main-agent-only handlers: `/agents`, `/agent_start`, `/agent_stop`, `/agent_restart`
 
 Matrix command ownership (`messenger/matrix/bot.py`):
 
-- direct transport commands: `!stop`, `!stop_all`, `!interrupt`, `!restart`, `!new`, `!help`, `!info`, `!session`, `!showfiles`, `!agent_commands`
+- direct transport commands: `!stop`, `!stop_all`, `!interrupt`, `!restart`, `!new`, `!reset`, `!help`, `!info`, `!session`, `!showfiles`, `!agent_commands`
 - orchestrator-routed commands: `!status`, `!model`, `!memory`, `!cron`, `!diagnose`, `!upgrade`, `!sessions`, `!tasks`
 - main-agent-only multi-agent commands: `!agents`, `!agent_start`, `!agent_stop`, `!agent_restart` (`/` prefix also supported)
 
 Orchestrator command registry (`orchestrator/commands.py`):
 
-- `/new`, `/status`, `/model`, `/memory`, `/cron`, `/diagnose`, `/upgrade`, `/sessions`, `/tasks`
+- `/new`, `/reset`, `/status`, `/model`, `/memory`, `/cron`, `/diagnose`, `/upgrade`, `/sessions`, `/tasks`
 - multi-agent commands are registered at runtime by supervisor hook
 
 Abort behavior:
@@ -144,7 +144,8 @@ Provider isolation inside a session:
 
 - each session has provider-local buckets (`provider_sessions`)
 - switching provider/model preserves other provider buckets
-- `/new` resets only the active provider bucket
+- `/new` resets the configured default-provider bucket
+- `/reset` resets the currently active provider bucket
 
 Per-topic `/model` behavior:
 

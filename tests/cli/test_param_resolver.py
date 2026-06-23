@@ -95,15 +95,20 @@ def test_resolve_with_task_overrides(
 
 
 def test_resolve_merge_parameters(base_config: AgentConfig, codex_cache: CodexModelCache) -> None:
-    """Should use task-specific CLI parameters."""
+    """Should append task-specific CLI parameters after global provider parameters."""
+    base_config.cli_parameters = CLIParametersConfig(claude=["--global-param", "global-value"])
     overrides = TaskOverrides(
         cli_parameters=["--task-param", "task-value"],
     )
 
     result = resolve_cli_config(base_config, codex_cache, task_overrides=overrides)
 
-    # Should contain task params (no global provider-specific params in flat config)
-    assert result.cli_parameters == ["--task-param", "task-value"]
+    assert result.cli_parameters == [
+        "--global-param",
+        "global-value",
+        "--task-param",
+        "task-value",
+    ]
 
 
 def test_resolve_invalid_claude_model(
@@ -126,6 +131,19 @@ def test_resolve_invalid_codex_model(
     )
 
     with pytest.raises(DuctorError, match="Invalid Codex model"):
+        resolve_cli_config(base_config, codex_cache, task_overrides=overrides)
+
+
+def test_resolve_rejects_unsupported_task_provider(
+    base_config: AgentConfig, codex_cache: CodexModelCache
+) -> None:
+    """Cron/webhook one-shot execution supports only explicit task providers."""
+    overrides = TaskOverrides(
+        provider="antigravity",
+        model="antigravity-default",
+    )
+
+    with pytest.raises(DuctorError, match="Unsupported task provider: antigravity"):
         resolve_cli_config(base_config, codex_cache, task_overrides=overrides)
 
 

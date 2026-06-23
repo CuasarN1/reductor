@@ -18,11 +18,12 @@ from ductor_bot.background import BackgroundObserver, BackgroundResult
 if TYPE_CHECKING:
     from ductor_bot.bus.bus import MessageBus
 from ductor_bot.cleanup import CleanupObserver
+from ductor_bot.cli.antigravity_cache_observer import AntigravityCacheObserver
 from ductor_bot.cli.codex_cache import CodexModelCache
 from ductor_bot.cli.codex_cache_observer import CodexCacheObserver
 from ductor_bot.cli.gemini_cache_observer import GeminiCacheObserver
 from ductor_bot.cli.service import CLIService
-from ductor_bot.config import AgentConfig, get_gemini_models
+from ductor_bot.config import AgentConfig, get_antigravity_models, get_gemini_models
 from ductor_bot.config_reload import ConfigReloader
 from ductor_bot.cron.manager import CronManager
 from ductor_bot.cron.observer import CronObserver
@@ -52,6 +53,7 @@ class ObserverManager:
         self.codex_cache: CodexModelCache | None = None
         self.codex_cache_obs: CodexCacheObserver | None = None
         self.gemini_cache_obs: GeminiCacheObserver | None = None
+        self.antigravity_cache_obs: AntigravityCacheObserver | None = None
 
         self._config_reloader: ConfigReloader | None = None
         self._rule_sync_task: asyncio.Task[None] | None = None
@@ -63,8 +65,9 @@ class ObserverManager:
         self,
         *,
         on_gemini_refresh: Callable[[tuple[str, ...]], None],
+        on_antigravity_refresh: Callable[[tuple[str, ...]], None],
     ) -> CodexModelCache:
-        """Start Gemini and Codex cache observers, return Codex cache."""
+        """Start Gemini, Antigravity, and Codex cache observers, return Codex cache."""
         # Gemini
         gemini_cache_path = self._paths.config_path.parent / "gemini_models.json"
         gemini_observer = GeminiCacheObserver(gemini_cache_path, on_refresh=on_gemini_refresh)
@@ -73,6 +76,17 @@ class ObserverManager:
 
         if not get_gemini_models():
             logger.warning("Gemini cache is empty after startup (Gemini may not be installed)")
+
+        # Antigravity
+        antigravity_cache_path = self._paths.config_path.parent / "antigravity_models.json"
+        antigravity_observer = AntigravityCacheObserver(
+            antigravity_cache_path, on_refresh=on_antigravity_refresh
+        )
+        await antigravity_observer.start()
+        self.antigravity_cache_obs = antigravity_observer
+
+        if not get_antigravity_models():
+            logger.warning("Antigravity cache is empty after startup (agy may not be installed)")
 
         # Codex
         codex_cache_path = self._paths.config_path.parent / "codex_models.json"
@@ -159,6 +173,9 @@ class ObserverManager:
         if self.gemini_cache_obs:
             await self.gemini_cache_obs.stop()
             self.gemini_cache_obs = None
+        if self.antigravity_cache_obs:
+            await self.antigravity_cache_obs.stop()
+            self.antigravity_cache_obs = None
         for task in (self._rule_sync_task, self._skill_sync_task):
             if task and not task.done():
                 task.cancel()

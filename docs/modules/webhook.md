@@ -113,6 +113,8 @@ One-shot isolated run in task folder:
 6. execute with timeout
 7. parse result and return `WebhookResult`
 
+Antigravity is not supported in webhook `cron_task` mode because that path uses the cron one-shot command builder.
+
 ## Common result statuses
 
 - `success`

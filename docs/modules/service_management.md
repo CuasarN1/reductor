@@ -96,6 +96,7 @@ Task details:
 - runs with `InteractiveToken` and `LeastPrivilege`
 - prefers `pythonw.exe -m ductor_bot` for windowless execution
 - falls back to the `ductor` binary when `pythonw.exe` is unavailable
+- non-interactive child processes (auth/model probes, npm/node discovery, `tasklist`/`taskkill`/`powershell`, updater) pass `CREATE_NO_WINDOW` (shared `infra/platform.py::CREATION_FLAGS`) so no console window flashes under the `pythonw.exe` background task
 
 Operational notes:
 

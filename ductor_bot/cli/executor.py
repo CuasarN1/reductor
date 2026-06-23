@@ -27,7 +27,7 @@ from ductor_bot.infra.process_tree import force_kill_process_tree
 logger = logging.getLogger(__name__)
 
 
-def _build_subprocess_env(config: CLIConfig) -> dict[str, str] | None:
+def build_subprocess_env(config: CLIConfig) -> dict[str, str] | None:
     """Build environment dict with agent identification vars.
 
     Returns None if no extra vars are needed (avoids inheriting a stripped env).
@@ -140,7 +140,7 @@ async def run_streaming_subprocess(
     7. Cleanup: cancel drain, unregister tracked process
     8. Post-loop: delegate to *post_handler* (default: yield error on non-zero exit)
     """
-    subprocess_env = _build_subprocess_env(config) if spec.use_cwd else None
+    subprocess_env = build_subprocess_env(config) if spec.use_cwd else None
     process = await asyncio.create_subprocess_exec(
         *spec.exec_cmd,
         stdin=_win_stdin_pipe(),
@@ -284,7 +284,7 @@ async def run_oneshot_subprocess(
     4. Handle timeout
     5. Parse output via *parse_output* callback
     """
-    oneshot_env = _build_subprocess_env(config) if spec.use_cwd else None
+    oneshot_env = build_subprocess_env(config) if spec.use_cwd else None
     process = await asyncio.create_subprocess_exec(
         *spec.exec_cmd,
         stdin=_win_stdin_pipe(),

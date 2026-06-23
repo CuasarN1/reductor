@@ -287,7 +287,9 @@ class TestSendFile:
         bot.send_message = AsyncMock()
         await send_file(bot, chat_id=1, path=tmp_path / "missing.txt")
         bot.send_message.assert_called_once()
-        assert "not found" in bot.send_message.call_args.kwargs["text"].lower()
+        text = bot.send_message.call_args.kwargs["text"]
+        assert "not found" in text.lower()
+        assert str(tmp_path / "missing.txt") in text
 
     async def test_blocked_path_sends_warning(self, tmp_path: Path) -> None:
         from ductor_bot.messenger.telegram.sender import send_file

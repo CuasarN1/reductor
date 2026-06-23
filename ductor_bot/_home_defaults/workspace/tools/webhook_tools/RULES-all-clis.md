@@ -12,7 +12,7 @@ Scripts for managing incoming HTTP webhook endpoints.
    - `gemini` - Google Gemini models
 
 2. **Which model?**
-   - **If Claude:** `haiku`, `sonnet` (recommended), `opus`
+   - **If Claude:** `haiku`, `sonnet` (recommended), `sonnet[1m]`, `opus`, `opus[1m]`, `fable`
    - **If Codex:** `gpt-5.2-codex` (recommended), `gpt-5.3-codex`, `gpt-5.1-codex-max`, `gpt-5.2`, `gpt-5.1-codex-mini`
    - **If Gemini:** `gemini-2.5-pro` (recommended), `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-3-pro-preview`, `gemini-3-flash-preview`, `gemini-3.1-pro-preview`
 
@@ -248,7 +248,7 @@ Webhooks in `cron_task` mode can override global config settings in `webhooks.js
 
 - `provider`: `"claude"`, `"codex"`, or `"gemini"` (optional, defaults to global config)
 - `model`: Model name (optional, defaults to global config)
-  - Claude models: `"haiku"`, `"sonnet"`, `"opus"`
+  - Claude models: `"haiku"`, `"sonnet"`, `"sonnet[1m]"`, `"opus"`, `"opus[1m]"`, `"fable"`
   - Codex models:
     - `"gpt-5.2-codex"` - Frontier agentic coding model
     - `"gpt-5.3-codex"` - Latest frontier agentic coding model

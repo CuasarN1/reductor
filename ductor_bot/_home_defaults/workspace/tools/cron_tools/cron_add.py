@@ -77,6 +77,11 @@ DEPENDENCIES (optional, prevent concurrent resource conflicts):
                       Examples: --dependency chrome_browser (multiple browser automation jobs)
                                 --dependency api_rate_limit (API calls with rate limiting)
 
+DELIVERY (optional):
+  --silent-on-success Skip the Telegram push when the job succeeds (errors are
+                      still delivered). Use for quiet-hours technical jobs that
+                      only need to be heard about on failure.
+
 TIMEZONE REMINDER:
   Hours in cron expressions are interpreted in the user's timezone.
   If user_timezone is NOT set in config.json, ask the user where they are
@@ -211,7 +216,9 @@ def main() -> None:
     parser.add_argument(
         "--provider",
         choices=["claude", "codex", "gemini"],
-        help="CLI provider for this job (claude, codex, or gemini). If omitted, uses global config.",
+        help=(
+            "CLI provider for this job (claude, codex, or gemini). If omitted, uses global config."
+        ),
     )
     parser.add_argument(
         "--model",
@@ -249,6 +256,12 @@ def main() -> None:
         "--dependency",
         help="Resource dependency (e.g. 'chrome_browser'). "
         "Jobs with same dependency run sequentially, different dependencies run in parallel.",
+    )
+    parser.add_argument(
+        "--silent-on-success",
+        action="store_true",
+        help="Suppress the Telegram push when the job succeeds. "
+        "Errors are still delivered. Useful for nightly technical jobs.",
     )
     args = parser.parse_args()
 
@@ -315,6 +328,8 @@ def main() -> None:
         job["quiet_end"] = args.quiet_end
     if args.dependency:
         job["dependency"] = args.dependency.strip()
+    if args.silent_on_success:
+        job["silent_on_success"] = True
     chat_id = os.environ.get("DUCTOR_CHAT_ID", "")
     topic_id = os.environ.get("DUCTOR_TOPIC_ID", "")
     transport = os.environ.get("DUCTOR_TRANSPORT", "tg")

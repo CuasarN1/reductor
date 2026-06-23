@@ -14,6 +14,7 @@ from ductor_bot.orchestrator.flows import (
     _finish_normal,
     _strip_ack_token,
     _update_session,
+    named_session_flow,
     normal,
     normal_streaming,
 )
@@ -697,6 +698,36 @@ async def test_normal_abort_skips_retry(orch: Orchestrator) -> None:
     assert mock_execute.call_count == 1  # No retry
 
 
+async def test_topic_abort_skips_recovery(orch: Orchestrator) -> None:
+    """Topic-scoped /stop returns empty instead of session recovery."""
+    key = SessionKey(chat_id=1, topic_id=42)
+    mock_execute = AsyncMock(
+        return_value=_mock_response(is_error=True, result="killed", returncode=-9),
+    )
+    object.__setattr__(orch._cli_service, "execute", mock_execute)
+    orch._process_registry._aborted_topics.add((1, 42))
+
+    result = await normal(orch, key, "Hello")
+    assert result.text == ""
+    assert mock_execute.call_count == 1
+
+
+async def test_topic_abort_error_response_skips_chat_wide_reset(orch: Orchestrator) -> None:
+    """Non-SIGKILL error after a topic /stop must not fall through to kill_all."""
+    key = SessionKey(chat_id=1, topic_id=42)
+    mock_execute = AsyncMock(
+        return_value=_mock_response(is_error=True, result="boom", returncode=1),
+    )
+    object.__setattr__(orch._cli_service, "execute", mock_execute)
+    kill_all = AsyncMock(return_value=0)
+    object.__setattr__(orch._process_registry, "kill_all", kill_all)
+    orch._process_registry._aborted_topics.add((1, 42))
+
+    result = await normal(orch, key, "Hello")
+    assert result.text == ""
+    kill_all.assert_not_awaited()
+
+
 async def test_streaming_abort_skips_retry(orch: Orchestrator) -> None:
     """When process is aborted (via /stop), normal_streaming() returns empty instead of retrying."""
     mock_exec = AsyncMock(return_value=_mock_response())
@@ -724,6 +755,19 @@ async def test_normal_abort_discards_successful_response(orch: Orchestrator) -> 
 
     result = await normal(orch, SessionKey(chat_id=1), "Hello")
     assert result.text == ""
+
+
+async def test_named_session_topic_abort(orch: Orchestrator) -> None:
+    """Named-session follow-up honors topic-scoped abort markers."""
+    ns = orch._named_sessions.create(1, "claude", "opus", "Setup")
+    orch._named_sessions.update_after_response(1, ns.name, "sess-named")
+    mock_execute = AsyncMock(return_value=_mock_response(result="Agent replied"))
+    object.__setattr__(orch._cli_service, "execute", mock_execute)
+    orch._process_registry._aborted_topics.add((1, 42))
+
+    result = await named_session_flow(orch, SessionKey(chat_id=1, topic_id=42), ns.name, "Hello")
+    assert result.text == ""
+    assert ns.status == "idle"
 
 
 async def test_streaming_abort_discards_successful_response(orch: Orchestrator) -> None:

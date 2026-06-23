@@ -177,7 +177,9 @@ class AuthMiddleware(BaseMiddleware):
                     self._on_rejected(chat.id, chat_type, chat.title or "")
                 return None
             if user.id not in self._allowed_users:
-                sender_chat = getattr(event, "sender_chat", None) if isinstance(event, Message) else None
+                sender_chat = (
+                    getattr(event, "sender_chat", None) if isinstance(event, Message) else None
+                )
                 logger.info(
                     "Auth rejected Telegram group message: user not allowed chat_id=%s "
                     "chat_type=%s title=%r user_id=%s username=%r sender_chat_id=%s "

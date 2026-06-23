@@ -23,7 +23,7 @@ For shared messenger protocols and the transport registry, see
 
 Bot-level handlers:
 
-- `/start`, `/help`, `/info`, `/showfiles`, `/stop`, `/stop_all`, `/restart`, `/new`, `/session`, `/sessions`, `/tasks`, `/agent_commands`
+- `/start`, `/help`, `/info`, `/showfiles`, `/stop`, `/stop_all`, `/restart`, `/new`, `/reset`, `/session`, `/sessions`, `/tasks`, `/agent_commands`
 - main-agent only: `/agents`, `/agent_start`, `/agent_stop`, `/agent_restart`
 - hidden but supported: `/where`, `/leave` (not in Telegram command popup)
 
@@ -33,7 +33,7 @@ Immediate middleware-handled command path (pre-lock, no normal dispatch):
 
 Orchestrator-routed commands:
 
-- `/status`, `/memory`, `/model`, `/cron`, `/diagnose`, `/upgrade`, `/sessions`, `/tasks`
+- `/status`, `/memory`, `/model`, `/cron`, `/diagnose`, `/upgrade`, `/sessions`, `/tasks`, `/reset`
 
 ## Middleware behavior
 
@@ -101,6 +101,41 @@ Implications:
 - startup and periodic (24h) audits auto-leave groups no longer in `allowed_group_ids` and channels no longer in `allowed_channel_ids`
 - auth hot-reload (`allowed_group_ids`) triggers immediate audit task
 - `allowed_channel_ids` is supported by the bot runtime and audit path, but config hot-reload does not currently emit that field, so channel allowlist changes still need restart in practice
+
+## Reply context (`build_reply_prompt`, `prepend_reply_to_media`)
+
+When a user uses Telegram's native reply gesture, `_resolve_text()` prepends the
+cited message to the prompt. Both helpers share `_cited_reply_text()`, which
+prefers the user-selected quote fragment (Bot API 7.0+, `message.quote`) over the
+full replied-to body (`reply_to_message.text` or `.caption`).
+
+Text replies (`build_reply_prompt`) wrap both parts with explicit labels:
+
+```text
+The user is replying to this quoted message:
+> <quoted text>
+
+The user's message:
+<user input>
+```
+
+Media replies (`prepend_reply_to_media`) — where the reply is a voice / photo /
+video / ... attachment instead of text — prepend the quote plus an attachment-type
+note ahead of the `[INCOMING FILE]` block, so the agent knows the voicemail/image
+is the reply to the quote (and can transcribe it with that context):
+
+```text
+The user is replying to this quoted message:
+> <quoted text>
+
+Their reply is a voice message (the attached file below).
+
+[INCOMING FILE]
+...
+```
+
+Both return the body unchanged when the message is not a reply or the cited
+message has no text (forum-topic service messages).
 
 ## Message dispatch (`message_dispatch.py`)
 

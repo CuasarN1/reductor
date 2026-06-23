@@ -333,6 +333,7 @@ async def _maybe_recover_session(  # noqa: PLR0913
     _reg = orch._process_registry
     if (
         _reg.was_aborted(key.chat_id)
+        or _reg.was_aborted_topic(key.chat_id, key.topic_id)
         or _reg.was_interrupted(key.chat_id)
         or not _needs_session_recovery(response)
     ):
@@ -487,7 +488,11 @@ async def normal(  # noqa: PLR0911
         request, session, response = outcome.request, outcome.session, outcome.response
         session_recovered = outcome.session_recovered
         _reg = orch._process_registry
-        if _reg.was_aborted(key.chat_id) or _reg.was_interrupted(key.chat_id):
+        if (
+            _reg.was_aborted(key.chat_id)
+            or _reg.was_aborted_topic(key.chat_id, key.topic_id)
+            or _reg.was_interrupted(key.chat_id)
+        ):
             _reg.clear_interrupt(key.chat_id)
             await _preserve_session_from_response(orch, session, response, reason="abort")
             logger.info("Normal flow aborted/interrupted by user")
@@ -567,7 +572,11 @@ async def normal_streaming(  # noqa: PLR0911
             return outcome.failed_result
         request, session, response = outcome.request, outcome.session, outcome.response
         _reg = orch._process_registry
-        if _reg.was_aborted(key.chat_id) or _reg.was_interrupted(key.chat_id):
+        if (
+            _reg.was_aborted(key.chat_id)
+            or _reg.was_aborted_topic(key.chat_id, key.topic_id)
+            or _reg.was_interrupted(key.chat_id)
+        ):
             _reg.clear_interrupt(key.chat_id)
             await _preserve_session_from_response(orch, session, response, reason="abort")
             logger.info("Streaming flow aborted/interrupted by user")
@@ -735,7 +744,11 @@ async def named_session_flow(
     response = await orch._cli_service.execute(request)
 
     _reg = orch._process_registry
-    if _reg.was_aborted(key.chat_id) or _reg.was_interrupted(key.chat_id):
+    if (
+        _reg.was_aborted(key.chat_id)
+        or _reg.was_aborted_topic(key.chat_id, key.topic_id)
+        or _reg.was_interrupted(key.chat_id)
+    ):
         _reg.clear_interrupt(key.chat_id)
         ns.status = "idle"
         return OrchestratorResult(text="")
@@ -799,7 +812,11 @@ async def named_session_streaming(
     )
 
     _reg2 = orch._process_registry
-    if _reg2.was_aborted(key.chat_id) or _reg2.was_interrupted(key.chat_id):
+    if (
+        _reg2.was_aborted(key.chat_id)
+        or _reg2.was_aborted_topic(key.chat_id, key.topic_id)
+        or _reg2.was_interrupted(key.chat_id)
+    ):
         _reg2.clear_interrupt(key.chat_id)
         ns.status = "idle"
         return OrchestratorResult(text="")

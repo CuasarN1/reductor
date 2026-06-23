@@ -23,7 +23,7 @@ python3 tools/task_tools/create_task.py --name "Flugsuche Paris" "Suche verfügb
 
 Options:
 - `--name NAME` — human-readable task name (recommended)
-- `--provider PROV` — override provider (claude, codex, gemini)
+- `--provider PROV` — override provider (claude, codex, gemini, antigravity)
 - `--model MODEL` — override model (opus, sonnet, flash, etc.)
 - `--thinking LEVEL` — codex reasoning effort (low, medium, high)
 

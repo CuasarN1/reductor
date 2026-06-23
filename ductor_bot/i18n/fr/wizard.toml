@@ -10,6 +10,7 @@ header = "[bold]Backends IA détectés :[/bold]\n"
 claude = "  Claude Code CLI   {status}"
 codex = "  OpenAI Codex CLI  {status}"
 gemini = "  Google Gemini CLI {status}"
+antigravity = "  Antigravity CLI   {status}"
 no_auth = """\
 \n[bold red]Au moins un CLI doit être installé et authentifié.[/bold red]\n
   Claude: [dim]https://docs.anthropic.com/en/docs/claude-code[/dim]
@@ -18,6 +19,7 @@ no_auth = """\
 claude_check_failed = "[yellow]Claude auth check raised: {error}. Skipping.[/yellow]"
 codex_check_failed = "[yellow]Codex auth check raised: {error}. Skipping.[/yellow]"
 gemini_check_failed = "[yellow]Gemini auth check raised: {error}. Skipping.[/yellow]"
+antigravity_check_failed = "[yellow]Antigravity auth check raised: {error}. Skipping.[/yellow]"
 
 [disclaimer]
 title = "[bold yellow]Avertissement[/bold yellow]"

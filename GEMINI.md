@@ -2,7 +2,7 @@ This file gives coding agents a current map of the repository.
 
 ## Project Overview
 
-ductor is a multi-transport chat orchestrator for the official provider CLIs (`claude`, `codex`, `gemini`).
+ductor is a multi-transport chat orchestrator for the official provider CLIs (`claude`, `codex`, `gemini`, `agy`).
 It runs Telegram and/or Matrix, can expose an optional direct WebSocket API, keeps state under `~/.ductor`, and supervises the main agent plus optional sub-agents in one asyncio process.
 
 Stack:
@@ -86,7 +86,8 @@ Observer / TaskHub / InterAgentBus callback
 
 - `DuctorPaths` in `workspace/paths.py` is the single source of truth for runtime paths.
 - Session identity is `SessionKey(transport, chat_id, topic_id)` across Telegram chats/topics, Matrix rooms (mapped int), and API channel isolation.
-- `/new` resets only the active provider bucket for the active session key.
+- `/new` resets the configured default-provider bucket for the active session key.
+- `/reset` resets the currently active provider bucket for the active session key.
 - `MessageBus` is the single async delivery path for observers, task callbacks, webhook wake results, and async inter-agent responses. Delivery is transport-aware: UNICAST envelopes route to the matching transport only, with cascading fallback when the target transport is unavailable.
 - Telegram ingress and `MessageBus` share one `LockPool`; `ApiServer` currently uses its own lock pool.
 - Workspace init is zone-based:
@@ -109,6 +110,7 @@ All run as in-process asyncio tasks:
 - `CleanupObserver`
 - `CodexCacheObserver`
 - `GeminiCacheObserver`
+- `AntigravityCacheObserver`
 - config reloader
 - rule sync watcher
 - skill sync watcher

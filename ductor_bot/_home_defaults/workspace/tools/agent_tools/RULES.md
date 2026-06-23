@@ -45,14 +45,16 @@ When creating a sub-agent:
 1. Choose a descriptive lowercase name (no spaces, e.g. `finanzius`, `researcher`)
 2. Choose the transport: **Telegram** or **Matrix**
 3. Use **specific model names**, not provider names:
-   - Claude: `opus`, `sonnet`, `haiku`
+   - Claude: `opus`, `opus[1m]`, `sonnet`, `sonnet[1m]`, `haiku`, `fable`
    - Codex: `gpt-5.3-codex`, `gpt-5.2-codex`, `gpt-5.1-codex-mini` (check `config/codex_models.json`)
    - Gemini: `gemini-2.5-pro`, `gemini-2.5-flash` (check `config/gemini_models.json`)
-4. Provider is `claude`, `openai`, or `gemini`
+   - Antigravity: prefer `antigravity-default`; cached display names may pass
+     through, but `agy` model selection is not reliable
+4. Provider is `claude`, `openai`/`codex`, `gemini`, or `antigravity`
 5. The workspace is created automatically under `agents/<name>/`
 6. The sub-agent starts automatically within seconds (FileWatcher)
 
-**IMPORTANT:** Never use `codex` or `gemini` as model names — those are providers.
+**IMPORTANT:** Never use `codex`, `gemini`, or `antigravity` as model names — those are providers.
 The `--model` must be a specific model ID from the lists above.
 
 ### Telegram Agent

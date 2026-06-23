@@ -6,15 +6,22 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ductor_bot.config import AgentConfig, reset_gemini_models, set_gemini_models
+from ductor_bot.config import (
+    AgentConfig,
+    reset_antigravity_models,
+    reset_gemini_models,
+    set_gemini_models,
+)
 from ductor_bot.orchestrator.providers import ProviderManager
 
 
 @pytest.fixture(autouse=True)
-def _reset_gemini():
+def _reset_runtime_models():
     reset_gemini_models()
+    reset_antigravity_models()
     yield
     reset_gemini_models()
+    reset_antigravity_models()
 
 
 def _make_provider_manager(
@@ -44,6 +51,7 @@ class TestBuildProviderInfo:
         assert info[0]["name"] == "Claude Code"
         assert info[0]["color"] == "#F97316"
         assert sorted(info[0]["models"]) == [
+            "fable",
             "haiku",
             "opus",
             "opus[1m]",
@@ -82,6 +90,12 @@ class TestBuildProviderInfo:
         pm, obs = _make_provider_manager(frozenset({"codex"}))
         info = pm.build_provider_info(obs)
         assert info[0]["models"] == []
+
+    def test_antigravity_models(self) -> None:
+        pm, obs = _make_provider_manager(frozenset({"antigravity"}))
+        info = pm.build_provider_info(obs)
+        assert info[0]["id"] == "antigravity"
+        assert info[0]["models"] == ["antigravity-default"]
 
     def test_empty_providers(self) -> None:
         pm, obs = _make_provider_manager(frozenset())

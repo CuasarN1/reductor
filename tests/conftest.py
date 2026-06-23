@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from unittest.mock import patch
 
 import pytest
+
+from ductor_bot.config import reset_antigravity_models, reset_gemini_models
 
 
 @pytest.fixture(autouse=True)
@@ -68,3 +71,18 @@ def _no_real_service_management() -> object:
         "ductor_bot.cli_commands.lifecycle._stop_service_if_running",
     ):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_runtime_model_registries() -> Iterator[None]:
+    """Isolate dynamically-discovered model registries between tests.
+
+    Booting the orchestrator runs real provider discovery (e.g. ``agy
+    models``) which populates module-level runtime sets. Reset them around
+    every test so discovery in one test cannot leak into another.
+    """
+    reset_gemini_models()
+    reset_antigravity_models()
+    yield
+    reset_gemini_models()
+    reset_antigravity_models()

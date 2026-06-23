@@ -115,6 +115,10 @@ def _make_message(
     msg.sticker = None
     msg.video_note = None
 
+    # Reply defaults: not a reply
+    msg.quote = None
+    msg.reply_to_message = None
+
     # Forum topic support
     msg.is_topic_message = topic_thread_id is not None
     msg.message_thread_id = topic_thread_id
@@ -1073,28 +1077,31 @@ class TestCommandHandlers:
 
 class TestWebhookWake:
     async def test_calls_handle_message_and_sends_result(self) -> None:
-        import ductor_bot.messenger.telegram.transport as _tgt
-
         tg_bot, _ = _make_tg_bot()
         orch = _make_orchestrator(handle_message_text="Webhook reply")
         tg_bot._orchestrator = orch
+        tg_bot._bus.submit = AsyncMock()
 
-        with patch.object(_tgt, "send_rich", new_callable=AsyncMock) as mock_send:
-            result = await tg_bot._handle_webhook_wake(1, "Wake prompt")
+        result = await tg_bot._handle_webhook_wake(1, "Wake prompt")
 
+        from ductor_bot.bus.envelope import LockMode, Origin
         from ductor_bot.session.key import SessionKey
 
         orch.handle_message.assert_called_once_with(SessionKey(chat_id=1), "Wake prompt")
-        mock_send.assert_called_once()
-        assert mock_send.call_args[0][2] == "Webhook reply"
+        tg_bot._bus.submit.assert_called_once()
+        env = tg_bot._bus.submit.call_args.args[0]
+        assert env.origin is Origin.WEBHOOK_WAKE
+        assert env.chat_id == 1
+        assert env.prompt == "Wake prompt"
+        assert env.result_text == "Webhook reply"
+        assert env.lock_mode is LockMode.NONE
         assert result == "Webhook reply"
 
     async def test_acquires_per_chat_lock(self) -> None:
-        import ductor_bot.messenger.telegram.transport as _tgt
-
         tg_bot, _ = _make_tg_bot()
         orch = _make_orchestrator()
         tg_bot._orchestrator = orch
+        tg_bot._bus.submit = AsyncMock()
 
         lock = tg_bot.sequential.get_lock(1)
         lock_was_held = False
@@ -1108,35 +1115,32 @@ class TestWebhookWake:
 
         orch.handle_message = AsyncMock(side_effect=check_lock)
 
-        with patch.object(_tgt, "send_rich", new_callable=AsyncMock):
-            await tg_bot._handle_webhook_wake(1, "test")
+        await tg_bot._handle_webhook_wake(1, "test")
         assert lock_was_held
 
     async def test_queues_behind_active_message(self) -> None:
         """Webhook wake waits for active conversation turn to finish."""
-        import ductor_bot.messenger.telegram.transport as _tgt
-
         tg_bot, _ = _make_tg_bot()
         orch = _make_orchestrator()
         tg_bot._orchestrator = orch
+        tg_bot._bus.submit = AsyncMock()
 
         order: list[str] = []
         lock = tg_bot.sequential.get_lock(1)
 
-        with patch.object(_tgt, "send_rich", new_callable=AsyncMock):
-            async with lock:
+        async with lock:
 
-                async def slow_handle(*_a: object, **_k: object) -> MagicMock:
-                    order.append("webhook")
-                    return MagicMock(text="ok")
+            async def slow_handle(*_a: object, **_k: object) -> MagicMock:
+                order.append("webhook")
+                return MagicMock(text="ok")
 
-                orch.handle_message = AsyncMock(side_effect=slow_handle)
-                task = asyncio.create_task(tg_bot._handle_webhook_wake(1, "test"))
+            orch.handle_message = AsyncMock(side_effect=slow_handle)
+            task = asyncio.create_task(tg_bot._handle_webhook_wake(1, "test"))
 
-                await asyncio.sleep(0.01)
-                order.append("user_done")
+            await asyncio.sleep(0.01)
+            order.append("user_done")
 
-            await task
+        await task
         assert order == ["user_done", "webhook"]
 
 
