@@ -390,6 +390,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiogram" },
     { name = "aiohttp" },
+    { name = "aiohttp-socks" },
     { name = "cronsim" },
     { name = "filetype" },
     { name = "pillow" },
@@ -436,6 +437,7 @@ test = [
 requires-dist = [
     { name = "aiogram", specifier = ">=3.24.0,<4.0.0" },
     { name = "aiohttp", specifier = ">=3.9.0,<4.0.0" },
+    { name = "aiohttp-socks", specifier = ">=0.11.0" },
     { name = "cronsim", specifier = ">=2.7" },
     { name = "ductor", extras = ["test", "lint", "api", "matrix"], marker = "extra == 'dev'" },
     { name = "filetype", specifier = ">=1.2.0" },
