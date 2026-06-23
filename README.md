@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Claude Code, Codex CLI, and Gemini CLI as your coding assistant — on Telegram and Matrix.</strong><br>
-  Uses only official CLIs. Nothing spoofed. Optional network proxy support is available. Multi-transport, automation, and sub-agents in one runtime.
+  Uses only official CLIs. Nothing spoofed. Optional proxy support and durable Telegram delivery are available. Multi-transport, automation, and sub-agents in one runtime.
 </p>
 
 <p align="center">
@@ -15,6 +15,7 @@
 
 <p align="center">
   <a href="#quick-start">Quick start</a> &middot;
+  <a href="#fork-additions">Fork additions</a> &middot;
   <a href="#how-chats-work">How chats work</a> &middot;
   <a href="#commands">Commands</a> &middot;
   <a href="docs/README.md">Docs</a> &middot;
@@ -50,6 +51,20 @@ For Matrix support: `ductor install matrix` — see [Matrix setup guide](docs/ma
 
 Detailed setup: [`docs/installation.md`](docs/installation.md)
 
+## Fork additions
+
+This fork is based on upstream `v0.17.0` and adds a few operational features
+that are useful for always-on Telegram deployments:
+
+- **Proxy-aware Telegram runtime** — Telegram Bot API traffic can use
+  `DUCTOR_TELEGRAM_PROXY_URL`, while provider CLIs inherit standard proxy
+  variables from the host environment and `~/.ductor/.env`.
+- **Configurable `/showfiles` root** — the Telegram file browser can open a
+  project/worktree instead of only `~/.ductor/` via `showfiles_root`.
+- **Durable Telegram delivery outbox** — final Telegram replies are persisted
+  and retried after temporary proxy or Telegram network failures, including
+  normal chat answers and background/cron delivery paths.
+
 ## Proxy support
 
 ductor can work behind a network proxy for both Telegram Bot API traffic and
@@ -77,6 +92,31 @@ ductor
 Actual LLM proxy behavior depends on the provider CLI honoring these standard
 environment variables. If Docker sandboxing is enabled, pass the proxy variables
 into the container as well.
+
+## Telegram delivery resilience
+
+Telegram streaming is still live and best-effort, but this fork adds an
+authoritative final-message outbox for cases where the Telegram Bot API or a
+local proxy disconnects mid-answer.
+
+When a final response needs reliable delivery, ductor writes it to
+`~/.ductor/state/telegram_outbox/`, immediately tries to drain the queue, and
+keeps draining it in the background every 30 seconds. Pending items are retained
+with backoff after Telegram network/API errors and deleted only after a
+successful send.
+
+This covers:
+
+- non-streaming Telegram answers
+- streaming answers when a chunk/edit/file delivery hit a network error
+- stream fallback and empty-stream final answers
+- background task, inter-agent, webhook wake, and cron result delivery where the
+  message can be sent without prebuilt inline-keyboard state
+
+One edge case remains by design: if Telegram accepted a message but the network
+connection died before the API response reached ductor, the queued final answer
+can be sent again later. This trades a possible duplicate for not losing the
+tail of an answer.
 
 ## How chats work
 
@@ -229,6 +269,8 @@ Main chat:  "Ask codex-agent to write tests for the API"
 - **Cron jobs** — in-process scheduler with timezone support, per-job overrides, result routing to originating chat
 - **Webhooks** — `wake` (inject into active chat) and `cron_task` (isolated task run) modes
 - **Heartbeat** — proactive checks with per-target settings, group/topic support, chat validation
+- **Durable Telegram delivery** — final replies are retried from an on-disk outbox after proxy/network failures
+- **Configurable Telegram file browser** — `/showfiles` can browse `~/.ductor/` or a configured project root
 - **Image processing** — auto-resize and WebP conversion for incoming images (configurable)
 - **Media transcription hooks** — configurable external audio/video transcription commands for bundled media tools
 - **Notification routing** — startup/upgrade lifecycle messages can target specific chats/topics
@@ -349,7 +391,7 @@ This is **hot-reloadable** — change the language without restarting the bot.
 | `/sessions` | View/manage active sessions |
 | `/tasks` | View/manage background tasks |
 | `/cron` | Interactive cron management |
-| `/showfiles` | Browse `~/.ductor/` |
+| `/showfiles` | Browse `~/.ductor/` or configured `showfiles_root` |
 | `/diagnose` | Runtime diagnostics |
 | `/upgrade` | Check/apply updates |
 | `/agents` | Multi-agent status |
@@ -359,6 +401,19 @@ This is **hot-reloadable** — change the language without restarting the bot.
 | `/info` | Version + links |
 
 `/new` is intentionally a factory reset for the current `SessionKey`: it clears the bucket tied to the configured default model/provider for that chat or topic, not whichever provider you last switched to temporarily via `/model`.
+
+### File browser root
+
+`/showfiles` opens `~/.ductor/` by default. To make it browse a project or
+worktree instead, set `showfiles_root` in `~/.ductor/config/config.json`:
+
+```json
+{"showfiles_root": "/Users/you/projects/my-repo"}
+```
+
+Relative values are resolved under `~/.ductor/workspace/`. File sends still
+respect `file_access`; the browser root only changes what `/showfiles` displays
+and which directory a file-request callback points the agent at.
 
 ## Common CLI commands
 
@@ -413,6 +468,8 @@ the bundled agent tool scripts.
   agents.json                        # Sub-agent registry (optional)
   SHAREDMEMORY.md                    # Shared knowledge across all agents
   CLAUDE.md / AGENTS.md / GEMINI.md  # Rule files
+  state/
+    telegram_outbox/                 # Pending Telegram replies queued for retry
   logs/agent.log
   workspace/
     memory_system/MAINMEMORY.md      # Persistent memory
