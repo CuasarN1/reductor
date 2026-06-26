@@ -6,6 +6,7 @@ import base64
 import binascii
 import json
 import logging
+import time
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from shutil import copy2, which
@@ -46,16 +47,25 @@ _CODEX_STDIN_NOTICE_PREFIXES = (
     "Reading additional input from stdin",
 )
 _CODEX_NO_FINAL_RESPONSE = "Codex failed before producing a final response."
+_CODEX_GENERATED_IMAGE_SUFFIXES = frozenset({".jpeg", ".jpg", ".png", ".webp"})
+_CODEX_GENERATED_IMAGE_MTIME_TOLERANCE_SECONDS = 5.0
 
 
 class _StreamState:
     """Mutable accumulator for streaming session data."""
 
-    __slots__ = ("accumulated_text", "generated_files", "last_error_message", "thread_id")
+    __slots__ = (
+        "accumulated_text",
+        "generated_files",
+        "last_error_message",
+        "started_at_epoch",
+        "thread_id",
+    )
 
     def __init__(self) -> None:
         self.accumulated_text: list[str] = []
         self.generated_files: list[str] = []
+        self.started_at_epoch = time.time()
         self.thread_id: str | None = None
         # Captures the message from any ResultEvent(is_error=True) seen in
         # the stream (e.g. Codex `turn.failed`), so _codex_final_result can
@@ -191,6 +201,7 @@ class CodexCLI(BaseCLI):
         cmd = self._build_command(prompt, resume_session, json_output=True)
         exec_cmd, use_cwd = self._docker_wrap(cmd)
         _log_cmd(exec_cmd)
+        started_at_epoch = time.time()
         return await run_oneshot_subprocess(
             config=self._config,
             spec=SubprocessSpec(exec_cmd, use_cwd, prompt, timeout_seconds, timeout_controller),
@@ -199,6 +210,7 @@ class CodexCLI(BaseCLI):
                 stderr,
                 returncode,
                 generated_output_dir=self._generated_output_dir(),
+                generated_since_epoch=started_at_epoch,
             ),
             provider_label="Codex",
         )
@@ -237,6 +249,12 @@ class CodexCLI(BaseCLI):
                 yield event
 
         async def post_handler(result: SubprocessResult) -> AsyncGenerator[StreamEvent, None]:
+            for generated_file in _collect_codex_generated_image_files(
+                self._generated_output_dir(),
+                state.thread_id,
+                state.started_at_epoch,
+            ):
+                state.add_generated_file(generated_file)
             yield _codex_final_result(
                 result,
                 state.accumulated_text,
@@ -261,6 +279,7 @@ class CodexCLI(BaseCLI):
         returncode: int | None,
         *,
         generated_output_dir: Path | None = None,
+        generated_since_epoch: float | None = None,
     ) -> CLIResponse:
         """Parse Codex subprocess output into a CLIResponse."""
         stderr_text = stderr.decode(errors="replace")[:2000] if stderr else ""
@@ -283,6 +302,13 @@ class CodexCLI(BaseCLI):
             raw,
             generated_output_dir,
             thread_id,
+        )
+        generated_files.extend(
+            _collect_codex_generated_image_files(
+                generated_output_dir,
+                thread_id,
+                generated_since_epoch,
+            )
         )
         cleaned_stdout = _strip_codex_stdin_notices(raw)
         cleaned_stderr = _strip_codex_stdin_notices(stderr_text)
@@ -409,6 +435,38 @@ def _materialize_codex_generated_images(
     return paths
 
 
+def _collect_codex_generated_image_files(
+    output_dir: Path | None,
+    session_id: str | None,
+    generated_since_epoch: float | None,
+) -> list[Path]:
+    """Copy Codex-generated session images created during the current turn."""
+    if output_dir is None or session_id is None or generated_since_epoch is None:
+        return []
+
+    source_dir = _codex_generated_image_dir(session_id)
+    if source_dir is None or not source_dir.is_dir():
+        return []
+
+    if not _ensure_codex_generated_output_dir(output_dir):
+        return []
+
+    threshold = generated_since_epoch - _CODEX_GENERATED_IMAGE_MTIME_TOLERANCE_SECONDS
+    paths: list[Path] = []
+    for source in sorted(source_dir.iterdir()):
+        if source.suffix.lower() not in _CODEX_GENERATED_IMAGE_SUFFIXES:
+            continue
+        try:
+            if source.stat().st_mtime < threshold:
+                continue
+        except OSError:
+            continue
+        target = output_dir / f"codex_{_safe_codex_file_stem(source.stem)}{source.suffix.lower()}"
+        if _path_has_content(target) or _copy_codex_generated_image(source, target):
+            paths.append(target)
+    return paths
+
+
 def _materialize_codex_generated_image(
     data: dict[str, object],
     output_dir: Path,
@@ -480,6 +538,11 @@ def _materialize_codex_generated_image_target(
 
     if source is None or not source.exists():
         return False
+    return _copy_codex_generated_image(source, target)
+
+
+def _copy_codex_generated_image(source: Path, target: Path) -> bool:
+    """Copy one Codex-generated image into a public output path."""
     try:
         copy2(source, target)
     except OSError:
@@ -512,9 +575,17 @@ def _write_codex_generated_image_payload(payload: str, target: Path) -> bool:
 
 def _codex_generated_image_source(session_id: str | None, safe_call_id: str) -> Path | None:
     """Return Codex CLI's own generated image path, when it can be inferred."""
+    source_dir = _codex_generated_image_dir(session_id)
+    if source_dir is None:
+        return None
+    return source_dir / f"{safe_call_id}.png"
+
+
+def _codex_generated_image_dir(session_id: str | None) -> Path | None:
+    """Return Codex CLI's generated image directory for a session."""
     if not session_id:
         return None
-    return Path.home() / ".codex" / "generated_images" / session_id / f"{safe_call_id}.png"
+    return Path.home() / ".codex" / "generated_images" / session_id
 
 
 def _safe_codex_file_stem(value: str) -> str:

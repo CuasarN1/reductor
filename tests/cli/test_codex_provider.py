@@ -808,6 +808,44 @@ class TestSendStreaming:
         assert image_path.read_bytes() == b"png-bytes"
         assert result_events[-1].result == f"Done\n\n<file:{image_path}>"
 
+    async def test_streaming_collects_generated_image_from_session_dir(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        cli = _make_cli(monkeypatch, working_dir=str(tmp_path))
+        source_dir = tmp_path / "codex-generated" / "th-42"
+        source_dir.mkdir(parents=True)
+        source = source_dir / "ig_from_session.png"
+        source.write_bytes(b"png-from-session")
+        monkeypatch.setattr(
+            "ductor_bot.cli.codex_provider._codex_generated_image_dir",
+            lambda session_id: source_dir if session_id == "th-42" else None,
+        )
+        lines = [
+            json.dumps({"type": "thread.started", "thread_id": "th-42"}),
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {"type": "agent_message", "text": "Done"},
+                }
+            ),
+        ]
+        proc = _make_streaming_process(lines, returncode=0)
+
+        with patch("ductor_bot.cli.executor.asyncio") as mock_asyncio:
+            mock_asyncio.timeout = asyncio.timeout
+            mock_asyncio.subprocess = asyncio.subprocess
+            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=proc)
+            mock_asyncio.create_task = asyncio.ensure_future
+
+            events = await _collect_events(cli.send_streaming("hello"))
+
+        image_path = tmp_path / "output_to_user" / "codex_ig_from_session.png"
+        result_events = [e for e in events if isinstance(e, ResultEvent)]
+        assert image_path.read_bytes() == b"png-from-session"
+        assert result_events[-1].result == f"Done\n\n<file:{image_path}>"
+
     async def test_streaming_with_tool_events(self, monkeypatch: pytest.MonkeyPatch) -> None:
         cli = _make_cli(monkeypatch)
         lines = [
