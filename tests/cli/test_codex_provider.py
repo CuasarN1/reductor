@@ -13,7 +13,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from ductor_bot.cli.base import CLIConfig
-from ductor_bot.cli.codex_provider import CodexCLI, _codex_final_result, _log_cmd, _StreamState
+from ductor_bot.cli.codex_provider import (
+    CodexCLI,
+    _codex_final_result,
+    _log_cmd,
+    _StreamState,
+)
 from ductor_bot.cli.executor import SubprocessResult
 from ductor_bot.cli.process_registry import ProcessRegistry
 from ductor_bot.cli.stream_events import (
@@ -409,6 +414,38 @@ class TestParseOutput:
         assert "Hello world" in resp.result
         assert resp.usage["input_tokens"] == 100
 
+    def test_jsonl_output_materializes_generated_image(self, tmp_path: Path) -> None:
+        lines = "\n".join(
+            [
+                json.dumps({"type": "thread.started", "thread_id": "th-42"}),
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {"type": "agent_message", "text": "Done"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "image_generation_end",
+                        "call_id": "ig_test",
+                        "result": "cG5nLWJ5dGVz",
+                    }
+                ),
+            ]
+        )
+
+        resp = CodexCLI._parse_output(
+            lines.encode(),
+            b"",
+            0,
+            generated_output_dir=tmp_path,
+        )
+
+        image_path = tmp_path / "codex_ig_test.png"
+        assert resp.is_error is False
+        assert image_path.read_bytes() == b"png-bytes"
+        assert resp.result == f"Done\n\n<file:{image_path}>"
+
     def test_nonzero_returncode_marks_error(self) -> None:
         line = json.dumps(
             {
@@ -733,6 +770,43 @@ class TestSendStreaming:
         text_events = [e for e in events if isinstance(e, AssistantTextDelta)]
         assert len(text_events) == 1
         assert text_events[0].text == "OK"
+
+    async def test_streaming_materializes_generated_image(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        cli = _make_cli(monkeypatch, working_dir=str(tmp_path))
+        lines = [
+            json.dumps({"type": "thread.started", "thread_id": "th-42"}),
+            json.dumps(
+                {
+                    "type": "image_generation_end",
+                    "call_id": "ig_test",
+                    "result": "cG5nLWJ5dGVz",
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {"type": "agent_message", "text": "Done"},
+                }
+            ),
+        ]
+        proc = _make_streaming_process(lines, returncode=0)
+
+        with patch("ductor_bot.cli.executor.asyncio") as mock_asyncio:
+            mock_asyncio.timeout = asyncio.timeout
+            mock_asyncio.subprocess = asyncio.subprocess
+            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=proc)
+            mock_asyncio.create_task = asyncio.ensure_future
+
+            events = await _collect_events(cli.send_streaming("hello"))
+
+        image_path = tmp_path / "output_to_user" / "codex_ig_test.png"
+        result_events = [e for e in events if isinstance(e, ResultEvent)]
+        assert image_path.read_bytes() == b"png-bytes"
+        assert result_events[-1].result == f"Done\n\n<file:{image_path}>"
 
     async def test_streaming_with_tool_events(self, monkeypatch: pytest.MonkeyPatch) -> None:
         cli = _make_cli(monkeypatch)

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from shutil import which
+from shutil import copy2, which
 from typing import TYPE_CHECKING
 
 from ductor_bot.cli.base import (
@@ -49,10 +51,11 @@ _CODEX_NO_FINAL_RESPONSE = "Codex failed before producing a final response."
 class _StreamState:
     """Mutable accumulator for streaming session data."""
 
-    __slots__ = ("accumulated_text", "last_error_message", "thread_id")
+    __slots__ = ("accumulated_text", "generated_files", "last_error_message", "thread_id")
 
     def __init__(self) -> None:
         self.accumulated_text: list[str] = []
+        self.generated_files: list[str] = []
         self.thread_id: str | None = None
         # Captures the message from any ResultEvent(is_error=True) seen in
         # the stream (e.g. Codex `turn.failed`), so _codex_final_result can
@@ -67,6 +70,12 @@ class _StreamState:
             self.accumulated_text.append(event.text)
         elif isinstance(event, ResultEvent) and event.is_error and event.result:
             self.last_error_message = event.result
+
+    def add_generated_file(self, path: Path) -> None:
+        """Track a materialized generated file once."""
+        path_str = str(path)
+        if path_str not in self.generated_files:
+            self.generated_files.append(path_str)
 
 
 class CodexCLI(BaseCLI):
@@ -185,7 +194,12 @@ class CodexCLI(BaseCLI):
         return await run_oneshot_subprocess(
             config=self._config,
             spec=SubprocessSpec(exec_cmd, use_cwd, prompt, timeout_seconds, timeout_controller),
-            parse_output=self._parse_output,
+            parse_output=lambda stdout, stderr, returncode: self._parse_output(
+                stdout,
+                stderr,
+                returncode,
+                generated_output_dir=self._generated_output_dir(),
+            ),
             provider_label="Codex",
         )
 
@@ -212,6 +226,12 @@ class CodexCLI(BaseCLI):
                 for event in thinking_filter.process(raw_event):
                     state.track(event)
                     yield event
+            for generated_file in _materialize_codex_generated_images(
+                line,
+                self._generated_output_dir(),
+                state.thread_id,
+            ):
+                state.add_generated_file(generated_file)
             for event in thinking_filter.flush():
                 state.track(event)
                 yield event
@@ -222,6 +242,7 @@ class CodexCLI(BaseCLI):
                 state.accumulated_text,
                 state.thread_id,
                 state.last_error_message,
+                generated_files=state.generated_files,
             )
 
         async for event in run_streaming_subprocess(
@@ -238,6 +259,8 @@ class CodexCLI(BaseCLI):
         stdout: bytes,
         stderr: bytes,
         returncode: int | None,
+        *,
+        generated_output_dir: Path | None = None,
     ) -> CLIResponse:
         """Parse Codex subprocess output into a CLIResponse."""
         stderr_text = stderr.decode(errors="replace")[:2000] if stderr else ""
@@ -256,11 +279,18 @@ class CodexCLI(BaseCLI):
 
         is_error = returncode != 0
         result_text, thread_id, usage = parse_codex_jsonl(raw)
+        generated_files = _materialize_codex_generated_images(
+            raw,
+            generated_output_dir,
+            thread_id,
+        )
         cleaned_stdout = _strip_codex_stdin_notices(raw)
         cleaned_stderr = _strip_codex_stdin_notices(stderr_text)
         parsed_error = _extract_codex_error_detail(raw)
         if result_text:
-            result = result_text
+            result = _append_file_tags(result_text, generated_files)
+        elif generated_files and not is_error:
+            result = _append_file_tags("", generated_files)
         elif is_error:
             stdout_fallback = "" if _is_codex_protocol_only(raw) else cleaned_stdout
             result = parsed_error or cleaned_stderr or stdout_fallback or _CODEX_NO_FINAL_RESPONSE
@@ -271,7 +301,7 @@ class CodexCLI(BaseCLI):
         response = CLIResponse(
             session_id=thread_id,
             result=result,
-            is_error=is_error or not result_text,
+            is_error=is_error or not (result_text or generated_files),
             returncode=returncode,
             stderr=stderr_text,
             usage=usage or {},
@@ -288,12 +318,18 @@ class CodexCLI(BaseCLI):
 
         return response
 
+    def _generated_output_dir(self) -> Path:
+        """Directory where generated media can be exposed via <file:...> tags."""
+        return self._working_dir / "output_to_user"
+
 
 def _codex_final_result(
     result: SubprocessResult,
     accumulated_text: list[str],
     thread_id: str | None,
     last_error_message: str | None = None,
+    *,
+    generated_files: list[str] | None = None,
 ) -> ResultEvent:
     """Build the final ResultEvent after the stream loop completes.
 
@@ -329,10 +365,161 @@ def _codex_final_result(
     return ResultEvent(
         type="result",
         session_id=thread_id,
-        result="\n".join(accumulated_text),
+        result=_append_file_tags("\n".join(accumulated_text), generated_files or []),
         is_error=False,
         returncode=result.process.returncode,
     )
+
+
+def _append_file_tags(text: str, file_paths: list[str]) -> str:
+    """Append file tags to the final text so messenger transports send them."""
+    unique_paths = list(dict.fromkeys(path for path in file_paths if path))
+    if not unique_paths:
+        return text
+    tags = "\n".join(f"<file:{path}>" for path in unique_paths)
+    stripped = text.rstrip()
+    if not stripped:
+        return tags
+    return f"{stripped}\n\n{tags}"
+
+
+def _materialize_codex_generated_images(
+    raw: str,
+    output_dir: Path | None,
+    session_id: str | None,
+) -> list[Path]:
+    """Persist Codex image_generation_end payloads under output_to_user."""
+    if output_dir is None:
+        return []
+
+    paths: list[Path] = []
+    for raw_line in raw.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        path = _materialize_codex_generated_image(data, output_dir, session_id)
+        if path is not None and path not in paths:
+            paths.append(path)
+    return paths
+
+
+def _materialize_codex_generated_image(
+    data: dict[str, object],
+    output_dir: Path,
+    session_id: str | None,
+) -> Path | None:
+    """Persist one Codex image_generation_end event and return the public path."""
+    if data.get("type") != "image_generation_end":
+        return None
+
+    safe_call_id = _codex_generated_image_safe_call_id(data)
+    if safe_call_id is None:
+        return None
+
+    target = output_dir / f"codex_{safe_call_id}.png"
+    if not _ensure_codex_generated_output_dir(output_dir):
+        return None
+
+    source = _codex_generated_image_source(session_id, safe_call_id)
+    if _path_has_content(target) or _materialize_codex_generated_image_target(
+        data,
+        target,
+        source,
+    ):
+        return target
+
+    logger.warning("Codex generated image was not materialized for call_id=%s", safe_call_id)
+    return None
+
+
+def _codex_generated_image_safe_call_id(data: dict[str, object]) -> str | None:
+    """Extract a path-safe Codex image call ID."""
+    call_id = data.get("call_id")
+    if not isinstance(call_id, str) or not call_id.strip():
+        logger.warning("Codex image_generation_end without call_id")
+        return None
+    safe_call_id = _safe_codex_file_stem(call_id)
+    if not safe_call_id:
+        logger.warning("Codex image_generation_end has unsafe call_id: %r", call_id)
+        return None
+    return safe_call_id
+
+
+def _ensure_codex_generated_output_dir(output_dir: Path) -> bool:
+    """Create the generated-image output directory if needed."""
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        logger.warning("Failed to create Codex generated image directory: %s", output_dir)
+        return False
+    return True
+
+
+def _materialize_codex_generated_image_target(
+    data: dict[str, object],
+    target: Path,
+    source: Path | None,
+) -> bool:
+    """Write or copy a Codex generated image into *target*."""
+    payload = data.get("result")
+    if (
+        isinstance(payload, str)
+        and payload.strip()
+        and _write_codex_generated_image_payload(
+            payload,
+            target,
+        )
+    ):
+        return True
+
+    if source is None or not source.exists():
+        return False
+    try:
+        copy2(source, target)
+    except OSError:
+        logger.warning("Failed to copy Codex generated image: %s", source)
+        return False
+    return True
+
+
+def _path_has_content(path: Path) -> bool:
+    """Return True when *path* exists and has non-zero size."""
+    try:
+        return path.exists() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _write_codex_generated_image_payload(payload: str, target: Path) -> bool:
+    """Decode a Codex base64 image payload into *target*."""
+    encoded = payload.strip()
+    if encoded.startswith("data:") and "," in encoded:
+        encoded = encoded.split(",", 1)[1]
+    try:
+        image_bytes = base64.b64decode(encoded, validate=True)
+        target.write_bytes(image_bytes)
+    except (binascii.Error, OSError, ValueError):
+        logger.warning("Failed to decode Codex generated image payload")
+        return False
+    return True
+
+
+def _codex_generated_image_source(session_id: str | None, safe_call_id: str) -> Path | None:
+    """Return Codex CLI's own generated image path, when it can be inferred."""
+    if not session_id:
+        return None
+    return Path.home() / ".codex" / "generated_images" / session_id / f"{safe_call_id}.png"
+
+
+def _safe_codex_file_stem(value: str) -> str:
+    """Keep Codex-generated filenames path-safe without changing common call IDs."""
+    return "".join(ch for ch in value.strip() if ch.isalnum() or ch in {"-", "_", "."}).strip(".-_")
 
 
 def _is_codex_stdin_notice(line: str) -> bool:
