@@ -392,6 +392,108 @@ class TestCronObserverExecution:
         assert job is not None
         assert job.last_run_status == "error:exit_1"
 
+    async def test_state_success_overrides_cli_exit_failure(self, tmp_path: Path) -> None:
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        mgr.add_job(_make_job("stateful"))
+        task_folder = paths.cron_tasks_dir / "stateful"
+        state_path = task_folder / "scripts" / "sync_state.json"
+        state_path.parent.mkdir(parents=True)
+
+        observer = _make_observer(paths, mgr)
+
+        async def _communicate(
+            *,
+            input: bytes | None = None,  # noqa: A002, ARG001
+        ) -> tuple[bytes, bytes]:
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "runs": [
+                            {
+                                "started_at": "2026-01-15T14:00:01Z",
+                                "ok": True,
+                                "error": None,
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return b"", b"agent finalization failed"
+
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 1
+        mock_proc.communicate = AsyncMock(side_effect=_communicate)
+
+        with (
+            time_machine.travel(datetime(2026, 1, 15, 14, 0, tzinfo=UTC)),
+            patch("ductor_bot.cron.execution.which", return_value="/usr/bin/claude"),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            await observer._execute_job("stateful", "Do stuff", "stateful")
+
+        job = mgr.get_job("stateful")
+        assert job is not None
+        assert job.last_run_status == "success"
+
+    async def test_state_failure_overrides_cli_success(self, tmp_path: Path) -> None:
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        mgr.add_job(_make_job("stateful", title="Calendar Sync"))
+        task_folder = paths.cron_tasks_dir / "stateful"
+        state_path = task_folder / "scripts" / "sync_state.json"
+        state_path.parent.mkdir(parents=True)
+
+        observer = _make_observer(paths, mgr)
+        callback = AsyncMock()
+        observer.set_result_handler(callback)
+
+        error = (
+            "Google Calendar GET event failed; event_id=abc; "
+            "message=<urlopen error TLS handshake timed out>"
+        )
+
+        async def _communicate(
+            *,
+            input: bytes | None = None,  # noqa: A002, ARG001
+        ) -> tuple[bytes, bytes]:
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "runs": [
+                            {
+                                "started_at": "2026-01-15T14:00:01Z",
+                                "ok": False,
+                                "error": error,
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return b'{"result": "message sent successfully delivered to telegram"}', b""
+
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(side_effect=_communicate)
+
+        with (
+            time_machine.travel(datetime(2026, 1, 15, 14, 0, tzinfo=UTC)),
+            patch("ductor_bot.cron.execution.which", return_value="/usr/bin/claude"),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            await observer._execute_job("stateful", "Do stuff", "stateful")
+
+        job = mgr.get_job("stateful")
+        assert job is not None
+        assert job.last_run_status == "error:task_result"
+        callback.assert_awaited_once()
+        title, result_text, status, *_routing = callback.call_args[0]
+        assert title == "Calendar Sync"
+        assert result_text == error
+        assert status == "error:task_result"
+
     async def test_uses_config_model(self, tmp_path: Path) -> None:
         """CLI command includes --model from AgentConfig."""
         paths = _make_paths(tmp_path)

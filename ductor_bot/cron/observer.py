@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cronsim import CronSim, CronSimError
@@ -42,6 +44,139 @@ class _ScheduledJob:
     instruction: str
     task_folder: str
     timezone: str
+
+
+@dataclass(frozen=True, slots=True)
+class _StateBackedResult:
+    """Cron task result derived from a task-owned state file."""
+
+    status: str
+    result_text: str | None
+    run_started_at: datetime
+
+
+_STATE_RESULT_START_TOLERANCE = timedelta(seconds=5)
+_CRON_SUCCESS_ACK_TEXT = "message sent successfully delivered to telegram"
+
+
+def _parse_state_timestamp(value: object) -> datetime | None:
+    """Parse a state-file timestamp as UTC."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    raw = value.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _state_error_text(error: object) -> str:
+    """Return a readable error from a task state run entry."""
+    if isinstance(error, str) and error.strip():
+        text = error.strip()
+    elif isinstance(error, dict):
+        text = _dict_state_error_text(error)
+    elif error is None:
+        text = "Task state reported failure without an error message"
+    else:
+        text = str(error)
+    return text
+
+
+def _dict_state_error_text(error: dict[object, object]) -> str:
+    """Return a readable error from a mapping-shaped task state error."""
+    message = error.get("message")
+    code = error.get("code")
+    if isinstance(message, str) and message.strip():
+        if code:
+            return f"{code}: {message.strip()}"
+        return message.strip()
+    try:
+        return json.dumps(error, ensure_ascii=False, sort_keys=True)
+    except TypeError:
+        return str(error)
+
+
+def _read_state_data(state_path: Path) -> dict[object, object] | None:
+    """Read and decode a task-owned state JSON object."""
+    try:
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.warning("Cron task state file is not readable: %s", state_path)
+        return None
+    if isinstance(data, dict):
+        return data
+    return None
+
+
+def _latest_state_run(
+    runs: object,
+    threshold: datetime,
+) -> tuple[datetime, dict[object, object]] | None:
+    """Find the latest state run that belongs to the current cron execution."""
+    if not isinstance(runs, list):
+        return None
+    latest_run: tuple[datetime, dict[object, object]] | None = None
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        run_started_at = _parse_state_timestamp(run.get("started_at"))
+        if run_started_at is None or run_started_at < threshold:
+            continue
+        if latest_run is None or run_started_at > latest_run[0]:
+            latest_run = (run_started_at, run)
+    return latest_run
+
+
+def _state_result_from_run(
+    run_started_at: datetime,
+    run: dict[object, object],
+) -> _StateBackedResult | None:
+    """Convert a state run entry into a normalized cron status."""
+    ok = run.get("ok")
+    if ok is True:
+        return _StateBackedResult(
+            status="success",
+            result_text=None,
+            run_started_at=run_started_at,
+        )
+    if ok is False:
+        return _StateBackedResult(
+            status="error:task_result",
+            result_text=_state_error_text(run.get("error")),
+            run_started_at=run_started_at,
+        )
+    return None
+
+
+def _state_backed_result(
+    cron_tasks_dir: Path,
+    task_folder: str,
+    started_at_utc: datetime,
+) -> _StateBackedResult | None:
+    """Read a task-owned sync state file when it contains this run's result."""
+    state_path = cron_tasks_dir / task_folder / "scripts" / "sync_state.json"
+    if not state_path.is_file():
+        return None
+
+    if started_at_utc.tzinfo is None:
+        started_at_utc = started_at_utc.replace(tzinfo=UTC)
+    started_at_utc = started_at_utc.astimezone(UTC)
+    threshold = started_at_utc - _STATE_RESULT_START_TOLERANCE
+
+    data = _read_state_data(state_path)
+    if data is None:
+        return None
+
+    latest_run = _latest_state_run(data.get("runs"), threshold)
+    if latest_run is None:
+        return None
+    return _state_result_from_run(*latest_run)
 
 
 class CronObserver(BaseTaskObserver):
@@ -355,6 +490,7 @@ class CronObserver(BaseTaskObserver):
             return
 
         logger.info("Cron job starting job=%s", job_title)
+        started_at_utc = datetime.now(UTC)
         t0 = time.monotonic()
 
         overrides = TaskOverrides(
@@ -393,14 +529,37 @@ class CronObserver(BaseTaskObserver):
             self._manager.update_run_status(job_id, status=result.status)
             return
 
+        status = result.status
+        result_text = result.result_text
+        state_result = _state_backed_result(
+            self._paths.cron_tasks_dir,
+            task_folder,
+            started_at_utc,
+        )
+        if state_result is not None:
+            if state_result.status != result.status:
+                logger.info(
+                    "Cron job state result overrides CLI status "
+                    "job=%s cli_status=%s state_status=%s state_started_at=%s",
+                    job_title,
+                    result.status,
+                    state_result.status,
+                    state_result.run_started_at.isoformat(),
+                )
+            status = state_result.status
+            if state_result.result_text is not None:
+                result_text = state_result.result_text
+            elif not result_text:
+                result_text = _CRON_SUCCESS_ACK_TEXT
+
         elapsed_ms = (time.monotonic() - t0) * 1000
         logger.info(
             "Cron job completed job=%s status=%s duration_ms=%.0f stdout=%d result=%d",
             job_title,
-            result.status,
+            status,
             elapsed_ms,
             len(result.execution.stdout),
-            len(result.result_text),
+            len(result_text),
         )
 
         # Deliver result BEFORE writing run-status to disk.  The file
@@ -408,18 +567,18 @@ class CronObserver(BaseTaskObserver):
         # cancels) running tasks.  Delivering first guarantees the
         # Telegram message is sent even if the task is cancelled during
         # the subsequent file I/O.
-        if job and job.silent_on_success and result.status == "success":
+        if job and job.silent_on_success and status == "success":
             logger.info("Cron job %s succeeded silently (silent_on_success)", job_title)
         else:
             await self._deliver_result(
                 job_id,
                 job_title,
-                result.result_text,
-                result.status,
+                result_text,
+                status,
                 routing,
             )
 
-        self._manager.update_run_status(job_id, status=result.status)
+        self._manager.update_run_status(job_id, status=status)
         # Refresh our mtime baseline so the file-watcher doesn't treat the
         # run-status write as a user-initiated change and trigger a full
         # reschedule of all other jobs.
