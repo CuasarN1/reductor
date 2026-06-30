@@ -33,6 +33,31 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_CODEX_TRANSIENT_STREAM_MAX_ATTEMPTS = 2
+_CODEX_TRANSIENT_STREAM_RETRY_DELAY_SECONDS = 1.0
+_CODEX_TRANSIENT_STREAM_ERROR_MARKERS = (
+    "stream disconnected before completion",
+    "error decoding response body",
+    "error sending request",
+    "failed to connect to websocket",
+    "tls handshake eof",
+    "unexpected eof",
+    "connection reset",
+    "server disconnected",
+    "proxy connection timed out",
+    "network error",
+    "http2 framing",
+)
+_CODEX_NON_TRANSIENT_ERROR_MARKERS = (
+    "usage limit",
+    "rate limit",
+    "unauthorized",
+    "forbidden",
+    "invalid api key",
+    "authentication",
+    "quota",
+)
+
 
 class _StreamCallbacks:
     """Dispatch stream events to the appropriate callbacks."""
@@ -51,6 +76,7 @@ class _StreamCallbacks:
         self._on_reasoning = on_reasoning
         self._on_compact_boundary = on_compact_boundary
         self.init_session_id: str | None = None
+        self.saw_tool_activity = False
 
     async def dispatch(self, event: StreamEvent) -> tuple[str, ResultEvent | None]:  # noqa: C901
         """Handle one event. Returns (accumulated_text_chunk, result_or_none)."""
@@ -66,8 +92,10 @@ class _StreamCallbacks:
                 await self._on_reasoning(event.text)
             elif self._on_status is not None:
                 await self._on_status("thinking")
-        elif isinstance(event, ToolUseEvent) and self._on_tool is not None:
-            await self._on_tool(event.tool_name)
+        elif isinstance(event, ToolUseEvent):
+            self.saw_tool_activity = True
+            if self._on_tool is not None:
+                await self._on_tool(event.tool_name)
         elif isinstance(event, SystemStatusEvent) and self._on_status is not None:
             await self._on_status(event.status)
         elif isinstance(event, CompactBoundaryEvent):
@@ -121,6 +149,16 @@ class CLIServiceConfig:
         if provider == "antigravity":
             return list(self.antigravity_cli_parameters)
         return list(self.claude_cli_parameters)
+
+
+@dataclass(frozen=True, slots=True)
+class _StreamAttemptResult:
+    """Result of one streaming subprocess attempt."""
+
+    accumulated_text: str
+    callbacks: _StreamCallbacks
+    result_event: ResultEvent | None
+    stream_error: bool
 
 
 class CLIService:
@@ -197,6 +235,7 @@ class CLIService:
         on_compact_boundary: Callable[[], Awaitable[None]] | None = None,
     ) -> AgentResponse:
         """Execute a streaming CLI call with automatic fallback to non-streaming."""
+        provider, _model = self.resolve_provider(request)
         cli = self._make_cli(request)
         logger.info(
             "CLI streaming starting label=%s model=%s",
@@ -204,43 +243,61 @@ class CLIService:
             self._resolve_model(request),
         )
 
-        accumulated_text = ""
-        result_event: ResultEvent | None = None
-        stream_error = False
+        attempt = 1
+        while True:
+            accumulated_text = ""
+            result_event: ResultEvent | None = None
+            stream_error = False
 
-        callbacks = _StreamCallbacks(
-            on_text_delta,
-            on_tool_activity,
-            on_system_status,
-            on_reasoning_delta,
-            on_compact_boundary,
-        )
-
-        try:
-            async for event in cli.send_streaming(
-                prompt=request.prompt,
-                resume_session=request.resume_session,
-                continue_session=request.continue_session,
-                timeout_seconds=request.timeout_seconds,
-                timeout_controller=request.timeout_controller,
-            ):
-                if self._process_registry.was_aborted(
-                    request.chat_id
-                ) or self._process_registry.was_aborted_topic(request.chat_id, request.topic_id):
-                    logger.info("Streaming aborted mid-stream chat=%d", request.chat_id)
-                    break
-                text, result = await callbacks.dispatch(event)
-                accumulated_text += text
-                if result is not None:
-                    result_event = result
-        except asyncio.CancelledError:
-            raise
-        except (OSError, RuntimeError, ValueError, UnicodeDecodeError):
-            logger.exception(
-                "Stream error label=%s, falling back",
-                request.process_label,
+            callbacks = _StreamCallbacks(
+                on_text_delta,
+                on_tool_activity,
+                on_system_status,
+                on_reasoning_delta,
+                on_compact_boundary,
             )
-            stream_error = True
+
+            try:
+                async for event in cli.send_streaming(
+                    prompt=request.prompt,
+                    resume_session=request.resume_session,
+                    continue_session=request.continue_session,
+                    timeout_seconds=request.timeout_seconds,
+                    timeout_controller=request.timeout_controller,
+                ):
+                    if self._request_was_aborted(request):
+                        logger.info("Streaming aborted mid-stream chat=%d", request.chat_id)
+                        break
+                    text, result = await callbacks.dispatch(event)
+                    accumulated_text += text
+                    if result is not None:
+                        result_event = result
+            except asyncio.CancelledError:
+                raise
+            except (OSError, RuntimeError, ValueError, UnicodeDecodeError):
+                logger.exception(
+                    "Stream error label=%s, falling back",
+                    request.process_label,
+                )
+                stream_error = True
+
+            attempt_result = _StreamAttemptResult(
+                accumulated_text=accumulated_text,
+                callbacks=callbacks,
+                result_event=result_event,
+                stream_error=stream_error,
+            )
+            if not self._should_retry_codex_stream(provider, request, attempt, attempt_result):
+                break
+
+            attempt += 1
+            logger.warning(
+                "Transient Codex stream error label=%s attempt=%d/%d; retrying",
+                request.process_label,
+                attempt,
+                _CODEX_TRANSIENT_STREAM_MAX_ATTEMPTS,
+            )
+            await asyncio.sleep(_CODEX_TRANSIENT_STREAM_RETRY_DELAY_SECONDS)
 
         if stream_error or result_event is None:
             return await self._handle_stream_fallback(
@@ -279,6 +336,30 @@ class CLIService:
         )
         return _cli_response_to_agent_response(cli_resp)
 
+    def _request_was_aborted(self, request: AgentRequest) -> bool:
+        """Return whether the user aborted the request or its topic."""
+        return self._process_registry.was_aborted(
+            request.chat_id
+        ) or self._process_registry.was_aborted_topic(request.chat_id, request.topic_id)
+
+    def _should_retry_codex_stream(
+        self,
+        provider: str,
+        request: AgentRequest,
+        attempt: int,
+        result: _StreamAttemptResult,
+    ) -> bool:
+        """Retry only safe transient Codex stream failures."""
+        if provider != "codex" or attempt >= _CODEX_TRANSIENT_STREAM_MAX_ATTEMPTS:
+            return False
+        if self._request_was_aborted(request):
+            return False
+        if result.stream_error or result.result_event is None or not result.result_event.is_error:
+            return False
+        if result.accumulated_text or result.callbacks.saw_tool_activity:
+            return False
+        return _is_transient_codex_stream_error(result.result_event.result)
+
     async def _handle_stream_fallback(
         self,
         request: AgentRequest,
@@ -288,9 +369,7 @@ class CLIService:
         init_session_id: str | None = None,
     ) -> AgentResponse:
         """Handle failed or incomplete streaming: use accumulated text or retry."""
-        was_aborted = self._process_registry.was_aborted(
-            request.chat_id
-        ) or self._process_registry.was_aborted_topic(request.chat_id, request.topic_id)
+        was_aborted = self._request_was_aborted(request)
         logger.info(
             "Stream fallback: aborted=%s accumulated=%d init_sid=%s",
             was_aborted,
@@ -374,6 +453,14 @@ class CLIService:
             response.total_tokens,
             elapsed_ms,
         )
+
+
+def _is_transient_codex_stream_error(message: str) -> bool:
+    """Return true for transport-like Codex stream failures worth one retry."""
+    normalized = message.casefold()
+    if any(marker in normalized for marker in _CODEX_NON_TRANSIENT_ERROR_MARKERS):
+        return False
+    return any(marker in normalized for marker in _CODEX_TRANSIENT_STREAM_ERROR_MARKERS)
 
 
 def _cli_response_to_agent_response(

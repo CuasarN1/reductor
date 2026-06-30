@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from ductor_bot.cli.process_registry import ProcessRegistry
 from ductor_bot.cli.service import CLIService, CLIServiceConfig
-from ductor_bot.cli.stream_events import StreamEvent
+from ductor_bot.cli.stream_events import AssistantTextDelta, ResultEvent, StreamEvent, ToolUseEvent
 from ductor_bot.cli.types import AgentRequest, CLIResponse
 from ductor_bot.config import ModelRegistry
 
@@ -117,6 +117,131 @@ async def test_execute_streaming_fallback_on_error() -> None:
 
     assert resp.stream_fallback is True
     assert resp.result == "Fallback result"
+
+
+async def test_execute_streaming_retries_transient_codex_error_before_text() -> None:
+    svc = _make_service()
+    attempts = 0
+
+    async def fake_stream(*_args: Any, **_kwargs: Any) -> AsyncGenerator[StreamEvent, None]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            yield ResultEvent(
+                type="result",
+                result=(
+                    "stream disconnected before completion: Transport error: "
+                    "network error: error decoding response body"
+                ),
+                is_error=True,
+                returncode=1,
+            )
+            return
+        yield AssistantTextDelta(type="assistant", text="Recovered")
+        yield ResultEvent(
+            type="result",
+            session_id="sess-ok",
+            result="Recovered",
+            is_error=False,
+        )
+
+    deltas: list[str] = []
+
+    async def on_delta(text: str) -> None:
+        deltas.append(text)
+
+    with (
+        patch("ductor_bot.cli.service.create_cli") as mock_create,
+        patch("ductor_bot.cli.service.asyncio.sleep", AsyncMock()) as mock_sleep,
+    ):
+        mock_cli = MagicMock()
+        mock_cli.send_streaming = fake_stream
+        mock_create.return_value = mock_cli
+
+        resp = await svc.execute_streaming(
+            AgentRequest(prompt="hello", chat_id=1, provider_override="codex"),
+            on_text_delta=on_delta,
+        )
+
+    assert attempts == 2
+    mock_sleep.assert_awaited_once()
+    assert resp.is_error is False
+    assert resp.stream_fallback is False
+    assert resp.result == "Recovered"
+    assert resp.session_id == "sess-ok"
+    assert deltas == ["Recovered"]
+
+
+async def test_execute_streaming_does_not_retry_transient_codex_error_after_text() -> None:
+    svc = _make_service()
+    attempts = 0
+
+    async def fake_stream(*_args: Any, **_kwargs: Any) -> AsyncGenerator[StreamEvent, None]:
+        nonlocal attempts
+        attempts += 1
+        yield AssistantTextDelta(type="assistant", text="Partial")
+        yield ResultEvent(
+            type="result",
+            result="stream disconnected before completion: network error",
+            is_error=True,
+            returncode=1,
+        )
+
+    deltas: list[str] = []
+
+    async def on_delta(text: str) -> None:
+        deltas.append(text)
+
+    with (
+        patch("ductor_bot.cli.service.create_cli") as mock_create,
+        patch("ductor_bot.cli.service.asyncio.sleep", AsyncMock()) as mock_sleep,
+    ):
+        mock_cli = MagicMock()
+        mock_cli.send_streaming = fake_stream
+        mock_create.return_value = mock_cli
+
+        resp = await svc.execute_streaming(
+            AgentRequest(prompt="hello", chat_id=1, provider_override="codex"),
+            on_text_delta=on_delta,
+        )
+
+    assert attempts == 1
+    mock_sleep.assert_not_awaited()
+    assert resp.is_error is True
+    assert resp.result == "stream disconnected before completion: network error"
+    assert deltas == ["Partial"]
+
+
+async def test_execute_streaming_does_not_retry_transient_codex_error_after_tool() -> None:
+    svc = _make_service()
+    attempts = 0
+
+    async def fake_stream(*_args: Any, **_kwargs: Any) -> AsyncGenerator[StreamEvent, None]:
+        nonlocal attempts
+        attempts += 1
+        yield ToolUseEvent(type="tool_use", tool_name="shell")
+        yield ResultEvent(
+            type="result",
+            result="failed to connect to websocket: IO error: tls handshake eof",
+            is_error=True,
+            returncode=1,
+        )
+
+    with (
+        patch("ductor_bot.cli.service.create_cli") as mock_create,
+        patch("ductor_bot.cli.service.asyncio.sleep", AsyncMock()) as mock_sleep,
+    ):
+        mock_cli = MagicMock()
+        mock_cli.send_streaming = fake_stream
+        mock_create.return_value = mock_cli
+
+        resp = await svc.execute_streaming(
+            AgentRequest(prompt="hello", chat_id=1, provider_override="codex"),
+        )
+
+    assert attempts == 1
+    mock_sleep.assert_not_awaited()
+    assert resp.is_error is True
 
 
 def test_update_default_model() -> None:
