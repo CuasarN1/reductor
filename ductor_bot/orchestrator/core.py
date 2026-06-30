@@ -26,6 +26,14 @@ from ductor_bot.errors import (
 )
 from ductor_bot.infra.docker import DockerManager
 from ductor_bot.infra.inflight import InflightTracker
+from ductor_bot.model_policy import (
+    can_switch_models,
+    model_denied_text,
+    model_switch_denied_text,
+    request_policy_denial,
+    select_model_target_for_prompt,
+    subject_id_for_key,
+)
 from ductor_bot.orchestrator.commands import (
     cmd_cron,
     cmd_diagnose,
@@ -91,6 +99,7 @@ class NamedSessionRequest:
     thread_id: int | None
     provider_override: str | None = None
     model_override: str | None = None
+    user_id: int | None = None
 
 
 @dataclass(slots=True)
@@ -155,6 +164,7 @@ class Orchestrator:
                 interagent_port=interagent_port,
                 transcribe_command=config.transcription.audio_command,
                 video_transcribe_command=config.transcription.video_command,
+                model_policy=config.model_policy,
             ),
             models=self._providers.models,
             available_providers=frozenset(),
@@ -346,7 +356,9 @@ class Orchestrator:
             logger.exception("Unexpected error in handle_message")
             return OrchestratorResult(text="An internal error occurred. Please try again.")
 
-    async def _route_message(self, dispatch: _MessageDispatch) -> OrchestratorResult:
+    async def _route_message(  # noqa: C901, PLR0911
+        self, dispatch: _MessageDispatch
+    ) -> OrchestratorResult:
         result = await self._command_registry.dispatch(
             dispatch.cmd,
             self,
@@ -385,12 +397,23 @@ class Orchestrator:
                 return await named_session_flow(self, dispatch.key, first_key, session_prompt)
 
         if directives.is_directive_only and directives.has_model:
+            user_id = subject_id_for_key(dispatch.key)
+            model = directives.model or ""
+            provider = self.models.provider_for(model)
+            if not can_switch_models(self._config, user_id):
+                return OrchestratorResult(text=model_switch_denied_text())
+            if not self.is_model_allowed_for_user(user_id, model, provider=provider):
+                return OrchestratorResult(text=model_denied_text(model))
             return OrchestratorResult(
                 text=f"Next message will use: {directives.model}\n"
                 f"(Send a message with @{directives.model} <text> to use it.)",
             )
 
         prompt_text = directives.cleaned or dispatch.text
+        if directives.has_model and not can_switch_models(
+            self._config, subject_id_for_key(dispatch.key)
+        ):
+            return OrchestratorResult(text=model_switch_denied_text())
 
         if dispatch.streaming:
             return await normal_streaming(
@@ -566,12 +589,45 @@ class Orchestrator:
             msg = "Background observer not initialized"
             raise RuntimeError(msg)
 
-        model_name, provider_name = self.resolve_runtime_target(self._config.model)
-        if request.provider_override:
-            provider_name = request.provider_override
-            model_name = request.model_override or self.default_model_for_provider(
-                request.provider_override
+        user_id = request.user_id if request.user_id is not None else (chat_id if chat_id > 0 else None)
+        model_policy_selected = False
+        selected = None
+        if not request.provider_override and not request.model_override:
+            selected = select_model_target_for_prompt(
+                self._config,
+                user_id,
+                prompt,
+                default_model=self._config.model,
+                provider_for=self.models.provider_for,
             )
+        if selected is not None:
+            model_name = selected.model
+            provider_name = selected.provider
+            reasoning_effort = selected.reasoning_effort
+            model_policy_selected = True
+        else:
+            model_name, provider_name = self.resolve_runtime_target(self._config.model)
+            reasoning_effort = None
+
+        if request.provider_override or request.model_override:
+            if not can_switch_models(self._config, user_id):
+                raise ValueError(model_switch_denied_text())
+            if request.provider_override:
+                provider_name = request.provider_override
+                model_name = request.model_override or self.default_model_for_provider(
+                    request.provider_override
+                )
+            elif request.model_override:
+                model_name = request.model_override
+                provider_name = self.models.provider_for(request.model_override)
+        if denial := request_policy_denial(
+            self._config,
+            user_id,
+            model_name,
+            provider=provider_name,
+            reasoning_effort=reasoning_effort or self._config.reasoning_effort,
+        ):
+            raise ValueError(denial)
 
         ns = self._named_sessions.create(chat_id, provider_name, model_name, prompt)
         exec_config = resolve_cli_config(self._config, self._observers.codex_cache)
@@ -580,6 +636,9 @@ class Orchestrator:
             prompt=prompt,
             message_id=request.message_id,
             thread_id=request.thread_id,
+            user_id=request.user_id,
+            reasoning_effort_override=reasoning_effort or "",
+            model_policy_selected=model_policy_selected,
             session_name=ns.name,
             provider_override=provider_name,
             model_override=model_name,
@@ -587,13 +646,14 @@ class Orchestrator:
         task_id = self._observers.background.submit(sub, exec_config)
         return task_id, ns.name
 
-    def submit_named_followup_bg(
+    def submit_named_followup_bg(  # noqa: PLR0913
         self,
         chat_id: int,
         session_name: str,
         prompt: str,
         message_id: int,
         thread_id: int | None,
+        user_id: int | None = None,
     ) -> str:
         """Submit a background follow-up to an existing named session. Returns task_id."""
         from ductor_bot.cli.param_resolver import resolve_cli_config
@@ -612,6 +672,15 @@ class Orchestrator:
         if ns.status == "running":
             msg = f"Session '{session_name}' is still processing"
             raise ValueError(msg)
+        policy_user_id = user_id if user_id is not None else (chat_id if chat_id > 0 else None)
+        if denial := request_policy_denial(
+            self._config,
+            policy_user_id,
+            ns.model,
+            provider=ns.provider,
+            reasoning_effort=self._config.reasoning_effort,
+        ):
+            raise ValueError(denial)
 
         self._named_sessions.mark_running(chat_id, session_name, prompt)
         exec_config = resolve_cli_config(self._config, self._observers.codex_cache)
@@ -620,6 +689,8 @@ class Orchestrator:
             prompt=prompt,
             message_id=message_id,
             thread_id=thread_id,
+            user_id=user_id,
+            model_policy_selected=True,
             session_name=session_name,
             resume_session_id=ns.session_id,
             provider_override=ns.provider,
@@ -647,6 +718,18 @@ class Orchestrator:
     def resolve_session_directive(self, key: str) -> tuple[str, str] | None:
         """Resolve a ``@key`` directive to ``(provider, model)`` or ``None``."""
         return self._providers.resolve_session_directive(key)
+
+    def is_model_allowed_for_user(
+        self,
+        user_id: int | None,
+        model_id: str,
+        *,
+        provider: str = "",
+    ) -> bool:
+        """Return whether a model is allowed by the configured user policy."""
+        from ductor_bot.model_policy import is_model_allowed
+
+        return is_model_allowed(self._config, user_id, model_id, provider=provider)
 
     def get_named_session(self, chat_id: int, name: str) -> NamedSession | None:
         """Look up a named session."""
@@ -702,6 +785,7 @@ class Orchestrator:
                 "permission_mode",
                 "reasoning_effort",
                 "cli_parameters",
+                "model_policy",
             )
         ):
             self._cli_service.update_config(
@@ -721,6 +805,7 @@ class Orchestrator:
                     antigravity_cli_parameters=tuple(config.cli_parameters.antigravity),
                     transcribe_command=config.transcription.audio_command,
                     video_transcribe_command=config.transcription.video_command,
+                    model_policy=config.model_policy,
                 )
             )
 

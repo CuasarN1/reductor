@@ -232,6 +232,35 @@ class CLIParametersConfig(BaseModel):
     antigravity: list[str] = Field(default_factory=list)
 
 
+class ModelPolicyRule(BaseModel):
+    """Per-user model and reasoning limits.
+
+    ``None`` means "inherit from the default rule" for user-specific entries
+    and "unrestricted" on the default rule. Use ``["*"]`` to explicitly allow
+    everything.
+    """
+
+    allowed_models: list[str] | None = None
+    allowed_reasoning_efforts: list[str] | None = None
+    allow_model_switch: bool | None = None
+
+    @field_validator("allowed_models", "allowed_reasoning_efforts", mode="before")
+    @classmethod
+    def _normalize_optional_list(cls, value: object) -> object:
+        """Accept a single string as a one-item list for compact config."""
+        if isinstance(value, str):
+            return [value]
+        return value
+
+
+class ModelPolicyConfig(BaseModel):
+    """Optional per-user restrictions for model selection and Codex reasoning."""
+
+    enabled: bool = False
+    default: ModelPolicyRule = Field(default_factory=ModelPolicyRule)
+    users: dict[str, ModelPolicyRule] = Field(default_factory=dict)
+
+
 class MatrixConfig(BaseModel):
     """Matrix homeserver connection settings."""
 
@@ -448,6 +477,7 @@ class AgentConfig(BaseModel):
     webhooks: WebhookConfig = Field(default_factory=WebhookConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     cli_parameters: CLIParametersConfig = Field(default_factory=CLIParametersConfig)
+    model_policy: ModelPolicyConfig = Field(default_factory=ModelPolicyConfig)
     image: ImageConfig = Field(default_factory=ImageConfig)
     timeouts: TimeoutConfig = Field(default_factory=TimeoutConfig)
     tasks: TasksConfig = Field(default_factory=TasksConfig)

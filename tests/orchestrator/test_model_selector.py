@@ -13,7 +13,12 @@ import pytest
 from ductor_bot.cli.auth import AuthResult, AuthStatus
 from ductor_bot.cli.codex_cache import CodexModelCache
 from ductor_bot.cli.codex_discovery import CodexModelInfo
-from ductor_bot.config import reset_gemini_models, set_gemini_models
+from ductor_bot.config import (
+    ModelPolicyConfig,
+    ModelPolicyRule,
+    reset_gemini_models,
+    set_gemini_models,
+)
 from ductor_bot.orchestrator.core import Orchestrator
 from ductor_bot.orchestrator.selectors.model_selector import (
     handle_model_callback,
@@ -159,8 +164,11 @@ async def test_start_shows_configured_model_without_runtime_fallback(orch: Orche
 
 
 async def test_start_two_providers(orch: Orchestrator) -> None:
-    with _patch_auth(
-        {"claude": _AUTHED_CLAUDE, "codex": _AUTHED_CODEX, "gemini": _NOT_FOUND_GEMINI}
+    with (
+        _patch_auth(
+            {"claude": _AUTHED_CLAUDE, "codex": _AUTHED_CODEX, "gemini": _NOT_FOUND_GEMINI}
+        ),
+        _with_codex_cache(orch),
     ):
         resp = await model_selector_start(orch, SessionKey(chat_id=1))
     assert "Model Selector" in resp.text
@@ -221,6 +229,39 @@ async def test_start_one_provider_antigravity(orch: Orchestrator) -> None:
     assert resp.buttons is not None
     labels = [btn.text for row in resp.buttons.rows for btn in row]
     assert "antigravity-default" in labels
+
+
+async def test_start_filters_models_by_user_policy(orch: Orchestrator) -> None:
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        default=ModelPolicyRule(allowed_models=["sonnet"], allow_model_switch=True),
+    )
+    with (
+        _patch_auth(
+            {"claude": _AUTHED_CLAUDE, "codex": _AUTHED_CODEX, "gemini": _NOT_FOUND_GEMINI}
+        ),
+        _with_codex_cache(orch),
+    ):
+        resp = await model_selector_start(orch, SessionKey(chat_id=-100, user_id=99))
+
+    assert "Select Claude model" in resp.text
+    assert resp.buttons is not None
+    callbacks = [btn.callback_data for row in resp.buttons.rows for btn in row]
+    assert "ms:m:sonnet" in callbacks
+    assert "ms:m:opus" not in callbacks
+    assert "ms:p:codex" not in callbacks
+
+
+async def test_start_denies_when_model_switch_disabled(orch: Orchestrator) -> None:
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        default=ModelPolicyRule(allow_model_switch=False),
+    )
+    with _patch_auth({"claude": _AUTHED_CLAUDE}):
+        resp = await model_selector_start(orch, SessionKey(chat_id=-100, user_id=99))
+
+    assert "Manual model selection is disabled" in resp.text
+    assert resp.buttons is None
 
 
 # -- handle_model_callback: provider selection --
@@ -302,6 +343,29 @@ async def test_callback_model_codex_mini_limited_efforts(orch: Orchestrator) -> 
     assert "Medium" in labels
     assert "High" in labels
     assert "Low" not in labels
+    assert "XHigh" not in labels
+
+
+async def test_callback_model_codex_filters_reasoning_by_user_policy(orch: Orchestrator) -> None:
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        default=ModelPolicyRule(
+            allowed_models=["gpt-5.2-codex"],
+            allowed_reasoning_efforts=["medium"],
+            allow_model_switch=True,
+        ),
+    )
+    with _with_codex_cache(orch):
+        resp = await handle_model_callback(
+            orch,
+            SessionKey(chat_id=-100, user_id=99),
+            "ms:m:gpt-5.2-codex",
+        )
+
+    assert resp.buttons is not None
+    labels = [btn.text for row in resp.buttons.rows for btn in row]
+    assert "Medium" in labels
+    assert "High" not in labels
     assert "XHigh" not in labels
 
 
@@ -472,3 +536,39 @@ async def test_switch_model_rejects_invalid_codex_reasoning_effort(orch: Orchest
 
     assert "Invalid reasoning effort" in result
     assert "gpt-4o-mini" in result
+
+
+async def test_switch_model_rejects_disallowed_model(orch: Orchestrator) -> None:
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        default=ModelPolicyRule(allowed_models=["sonnet"], allow_model_switch=True),
+    )
+    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+
+    result = await switch_model(orch, SessionKey(chat_id=-100, user_id=99), "opus")
+
+    assert "not allowed" in result
+    assert orch._config.model == "opus"
+    orch._process_registry.kill_all.assert_not_called()
+
+
+async def test_switch_model_rejects_disallowed_reasoning(orch: Orchestrator) -> None:
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        default=ModelPolicyRule(
+            allowed_models=["gpt-5.2-codex"],
+            allowed_reasoning_efforts=["medium"],
+            allow_model_switch=True,
+        ),
+    )
+    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+
+    result = await switch_model(
+        orch,
+        SessionKey(chat_id=-100, user_id=99),
+        "gpt-5.2-codex",
+        reasoning_effort="high",
+    )
+
+    assert "Reasoning effort `high` is not allowed" in result
+    orch._process_registry.kill_all.assert_not_called()

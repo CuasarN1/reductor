@@ -13,6 +13,8 @@ from ductor_bot.config import (
     MemoryCompactionConfig,
     MemoryFlushConfig,
     MemoryReflectionConfig,
+    ModelPolicyConfig,
+    ModelPolicyRule,
     ModelRegistry,
     StreamingConfig,
     deep_merge_config,
@@ -40,6 +42,31 @@ def test_agent_config_defaults() -> None:
     assert cfg.gemini_api_key is None
     assert cfg.telegram_token == ""
     assert cfg.allowed_user_ids == []
+    assert cfg.model_policy.enabled is False
+
+
+def test_model_policy_config_accepts_user_rules() -> None:
+    cfg = AgentConfig(
+        model_policy=ModelPolicyConfig(
+            enabled=True,
+            default=ModelPolicyRule(
+                allowed_models=["gpt-5.4-mini"],
+                allowed_reasoning_efforts=["low", "medium"],
+                allow_model_switch=False,
+            ),
+            users={
+                "123": ModelPolicyRule(
+                    allowed_models=["*"],
+                    allowed_reasoning_efforts=["*"],
+                    allow_model_switch=True,
+                )
+            },
+        )
+    )
+
+    assert cfg.model_policy.enabled is True
+    assert cfg.model_policy.default.allowed_models == ["gpt-5.4-mini"]
+    assert cfg.model_policy.users["123"].allowed_models == ["*"]
 
 
 def test_agent_config_normalizes_nullish_gemini_api_key() -> None:

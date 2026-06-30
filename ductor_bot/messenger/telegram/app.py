@@ -685,7 +685,8 @@ class TelegramBot:
 
         chat_id = message.chat.id
         thread_id = get_thread_id(message)
-        user_name = message.from_user.first_name if message.from_user else ""
+        from_user = getattr(message, "from_user", None)
+        user_name = from_user.first_name if from_user else ""
 
         auth_results = await asyncio.to_thread(check_all_auth)
         text = build_welcome_text(user_name, auth_results, self._config)
@@ -1040,6 +1041,8 @@ class TelegramBot:
         parts = text.split(None, 1)
         chat_id = message.chat.id
         thread_id = get_thread_id(message)
+        from_user = getattr(message, "from_user", None)
+        user_id = getattr(from_user, "id", None)
 
         if len(parts) < 2 or not parts[1].strip():
             await send_rich(
@@ -1083,7 +1086,12 @@ class TelegramBot:
         try:
             if session_followup:
                 task_id = self._orch.submit_named_followup_bg(
-                    chat_id, session_followup, prompt, message.message_id, thread_id
+                    chat_id,
+                    session_followup,
+                    prompt,
+                    message.message_id,
+                    thread_id,
+                    user_id=user_id,
                 )
                 await send_rich(
                     self._bot,
@@ -1101,6 +1109,7 @@ class TelegramBot:
                 ns_request = NamedSessionRequest(
                     message_id=message.message_id,
                     thread_id=thread_id,
+                    user_id=user_id,
                     provider_override=provider_override,
                     model_override=model_override,
                 )
@@ -1189,6 +1198,13 @@ class TelegramBot:
 
         chat_id = msg.chat.id
         key = get_session_key(msg)
+        callback_user = getattr(callback, "from_user", None)
+        if callback_user is not None:
+            key = SessionKey.telegram(
+                chat_id=key.chat_id,
+                topic_id=key.topic_id,
+                user_id=callback_user.id,
+            )
         thread_id = get_thread_id(msg)
         set_log_context(operation="cb", chat_id=chat_id)
         logger.info("Callback data=%s", data[:40])

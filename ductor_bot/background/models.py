@@ -14,6 +14,9 @@ class BackgroundSubmit:
     prompt: str
     message_id: int
     thread_id: int | None
+    user_id: int | None = None
+    reasoning_effort_override: str = ""
+    model_policy_selected: bool = False
     session_name: str = ""
     resume_session_id: str = ""
     provider_override: str = ""
@@ -29,6 +32,9 @@ class BackgroundTask:
     prompt: str
     message_id: int
     thread_id: int | None
+    user_id: int | None
+    reasoning_effort: str
+    model_policy_selected: bool
     provider: str
     model: str
     submitted_at: float

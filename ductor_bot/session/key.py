@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +20,7 @@ class SessionKey:
     transport: str = "tg"
     chat_id: int = 0
     topic_id: int | None = None
+    user_id: int | None = field(default=None, compare=False, hash=False, repr=False)
 
     @property
     def storage_key(self) -> str:
@@ -34,14 +35,25 @@ class SessionKey:
         return (self.chat_id, self.topic_id)
 
     @classmethod
-    def for_transport(cls, transport: str, chat_id: int, topic_id: int | None = None) -> SessionKey:
+    def for_transport(
+        cls,
+        transport: str,
+        chat_id: int,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+    ) -> SessionKey:
         """Create a session key for the given transport."""
-        return cls(transport=transport, chat_id=chat_id, topic_id=topic_id)
+        return cls(transport=transport, chat_id=chat_id, topic_id=topic_id, user_id=user_id)
 
     @classmethod
-    def telegram(cls, chat_id: int, topic_id: int | None = None) -> SessionKey:
+    def telegram(
+        cls,
+        chat_id: int,
+        topic_id: int | None = None,
+        user_id: int | None = None,
+    ) -> SessionKey:
         """Create a Telegram session key."""
-        return cls(transport="tg", chat_id=chat_id, topic_id=topic_id)
+        return cls(transport="tg", chat_id=chat_id, topic_id=topic_id, user_id=user_id)
 
     @classmethod
     def matrix(cls, chat_id: int) -> SessionKey:

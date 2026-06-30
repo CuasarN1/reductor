@@ -18,6 +18,13 @@ from ductor_bot.config import NULLISH_TEXT_VALUES, resolve_timeout
 from ductor_bot.i18n import t
 from ductor_bot.infra.inflight import InflightTurn
 from ductor_bot.log_context import set_log_context
+from ductor_bot.model_policy import (
+    can_switch_models,
+    model_switch_denied_text,
+    request_policy_denial,
+    select_model_target_for_prompt,
+    subject_id_for_request,
+)
 from ductor_bot.orchestrator.hooks import HookContext
 from ductor_bot.orchestrator.registry import OrchestratorResult
 from ductor_bot.session import SessionData, SessionKey
@@ -92,14 +99,33 @@ async def _prepare_normal(
 
     Returns (request, session) so the caller can update the session after the CLI call.
     """
-    requested_model = model_override or orch._config.model
-    req_model, req_provider = orch.resolve_runtime_target(requested_model)
+    user_id = subject_id_for_request(key.user_id, key.chat_id, key.transport)
+    policy_selected = False
+    reasoning_effort_override: str | None = None
+    selected = None
+    if model_override is None:
+        selected = select_model_target_for_prompt(
+            orch._config,
+            user_id,
+            text,
+            default_model=orch._config.model,
+            provider_for=orch.models.provider_for,
+        )
+    if selected is not None:
+        requested_model = selected.model
+        req_provider = selected.provider
+        policy_selected = True
+        reasoning_effort_override = selected.reasoning_effort
+    else:
+        requested_model = model_override or orch._config.model
+        req_provider = orch.models.provider_for(requested_model)
+    req_model = requested_model
 
     session, is_new = await orch._sessions.resolve_session(
         key,
         provider=req_provider,
         model=req_model,
-        preserve_existing_target=model_override is None,
+        preserve_existing_target=model_override is None and not policy_selected,
     )
     req_model = session.model
     req_provider = session.provider
@@ -142,8 +168,11 @@ async def _prepare_normal(
         append_system_prompt=append_prompt,
         model_override=req_model,
         provider_override=req_provider,
+        reasoning_effort_override=reasoning_effort_override,
+        model_policy_selected=policy_selected,
         chat_id=key.chat_id,
         topic_id=key.topic_id,
+        user_id=key.user_id,
         transport=key.transport,
         resume_session=None if is_new else session.session_id,
         timeout_seconds=timeout_secs,
@@ -412,6 +441,34 @@ def _request_target(orch: Orchestrator, request: AgentRequest) -> tuple[str, str
     return model_name, provider_name
 
 
+def _model_policy_denial(orch: Orchestrator, request: AgentRequest) -> OrchestratorResult | None:
+    """Return a user-facing denial when this request violates model policy."""
+    model_name, provider_name = _request_target(orch, request)
+    user_id = subject_id_for_request(request.user_id, request.chat_id, request.transport)
+    denial = request_policy_denial(
+        orch._config,
+        user_id,
+        model_name,
+        provider=provider_name,
+        reasoning_effort=orch._config.reasoning_effort,
+    )
+    return OrchestratorResult(text=denial) if denial else None
+
+
+def _manual_model_override_denial(
+    orch: Orchestrator,
+    key: SessionKey,
+    model_override: str | None,
+) -> OrchestratorResult | None:
+    """Return denial when a governed user tries a manual model override."""
+    if model_override is None:
+        return None
+    user_id = subject_id_for_request(key.user_id, key.chat_id, key.transport)
+    if can_switch_models(orch._config, user_id):
+        return None
+    return OrchestratorResult(text=model_switch_denied_text())
+
+
 def _begin_inflight(
     orch: Orchestrator,
     request: AgentRequest,
@@ -471,7 +528,11 @@ async def normal(  # noqa: PLR0911
 ) -> OrchestratorResult:
     """Handle normal conversation with session resume."""
     logger.info("Normal flow starting")
+    if denial := _manual_model_override_denial(orch, key, model_override):
+        return denial
     request, session = await _prepare_normal(orch, key, text, model_override=model_override)
+    if denial := _model_policy_denial(orch, request):
+        return denial
     warning = await _gemini_missing_config_key_warning(orch, request)
     if warning is not None:
         logger.warning("Gemini API-key mode without configured ductor key")
@@ -525,7 +586,7 @@ async def normal(  # noqa: PLR0911
         orch._inflight_tracker.complete(key.chat_id)
 
 
-async def normal_streaming(  # noqa: PLR0911
+async def normal_streaming(  # noqa: C901, PLR0911
     orch: Orchestrator,
     key: SessionKey,
     text: str,
@@ -535,7 +596,11 @@ async def normal_streaming(  # noqa: PLR0911
 ) -> OrchestratorResult:
     """Handle normal conversation with streaming output."""
     logger.info("Streaming flow starting")
+    if denial := _manual_model_override_denial(orch, key, model_override):
+        return denial
     request, session = await _prepare_normal(orch, key, text, model_override=model_override)
+    if denial := _model_policy_denial(orch, request):
+        return denial
     warning = await _gemini_missing_config_key_warning(orch, request)
     if warning is not None:
         logger.warning("Gemini API-key mode without configured ductor key")
@@ -712,7 +777,7 @@ def _strip_ack_token(text: str, token: str) -> str:
     return stripped
 
 
-async def named_session_flow(
+async def named_session_flow(  # noqa: PLR0911
     orch: Orchestrator,
     key: SessionKey,
     session_name: str,
@@ -733,14 +798,19 @@ async def named_session_flow(
         prompt=text,
         model_override=ns.model,
         provider_override=ns.provider,
+        model_policy_selected=True,
         chat_id=key.chat_id,
         topic_id=key.topic_id,
+        user_id=key.user_id,
         transport=key.transport,
         process_label=f"ns:{session_name}",
         resume_session=ns.session_id or None,
         timeout_seconds=resolve_timeout(orch._config, "normal"),
         timeout_controller=_make_timeout_controller(orch, "normal"),
     )
+    if denial := _model_policy_denial(orch, request):
+        ns.status = "idle"
+        return denial
     response = await orch._cli_service.execute(request)
 
     _reg = orch._process_registry
@@ -760,7 +830,7 @@ async def named_session_flow(
     return OrchestratorResult(text=f"{tag}{response.result}")
 
 
-async def named_session_streaming(
+async def named_session_streaming(  # noqa: PLR0911
     orch: Orchestrator,
     key: SessionKey,
     session_name: str,
@@ -784,14 +854,19 @@ async def named_session_streaming(
         prompt=text,
         model_override=ns.model,
         provider_override=ns.provider,
+        model_policy_selected=True,
         chat_id=key.chat_id,
         topic_id=key.topic_id,
+        user_id=key.user_id,
         transport=key.transport,
         process_label=f"ns:{session_name}",
         resume_session=ns.session_id or None,
         timeout_seconds=resolve_timeout(orch._config, "normal"),
         timeout_controller=_make_timeout_controller(orch, "normal"),
     )
+    if denial := _model_policy_denial(orch, request):
+        ns.status = "idle"
+        return denial
 
     tag_sent = False
 
@@ -887,8 +962,10 @@ async def heartbeat_flow(
         prompt=effective_prompt,
         model_override=req_model,
         provider_override=req_provider,
+        model_policy_selected=True,
         chat_id=key.chat_id,
         topic_id=key.topic_id,
+        user_id=key.user_id,
         transport=key.transport,
         resume_session=session.session_id,
         timeout_seconds=resolve_timeout(orch._config, "normal"),

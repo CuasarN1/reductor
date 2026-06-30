@@ -9,7 +9,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from ductor_bot.cli.base import CLIConfig
@@ -25,6 +25,13 @@ from ductor_bot.cli.stream_events import (
     ToolUseEvent,
 )
 from ductor_bot.cli.types import AgentRequest, AgentResponse, CLIResponse
+from ductor_bot.config import ModelPolicyConfig
+from ductor_bot.model_policy import (
+    model_switch_denied_text,
+    request_policy_denial_for_policy,
+    resolve_model_policy,
+    subject_id_for_request,
+)
 
 if TYPE_CHECKING:
     from ductor_bot.cli.base import BaseCLI
@@ -139,6 +146,7 @@ class CLIServiceConfig:
     # External transcription hooks (#66) — empty strings keep built-in strategies.
     transcribe_command: str = ""
     video_transcribe_command: str = ""
+    model_policy: ModelPolicyConfig = field(default_factory=ModelPolicyConfig)
 
     def cli_parameters_for_provider(self, provider: str) -> list[str]:
         """Return CLI parameters for the given provider."""
@@ -204,6 +212,9 @@ class CLIService:
 
     async def execute(self, request: AgentRequest) -> AgentResponse:
         """Execute a CLI call."""
+        if denial := self._policy_denial(request):
+            return AgentResponse(result=denial, is_error=True)
+
         cli = self._make_cli(request)
         logger.info(
             "CLI execute starting label=%s model=%s",
@@ -225,7 +236,7 @@ class CLIService:
         self._log_call(request, agent_resp, elapsed_ms)
         return agent_resp
 
-    async def execute_streaming(  # noqa: PLR0913
+    async def execute_streaming(  # noqa: C901, PLR0913
         self,
         request: AgentRequest,
         on_text_delta: Callable[[str], Awaitable[None]] | None = None,
@@ -236,6 +247,9 @@ class CLIService:
     ) -> AgentResponse:
         """Execute a streaming CLI call with automatic fallback to non-streaming."""
         provider, _model = self.resolve_provider(request)
+        if denial := self._policy_denial(request):
+            return AgentResponse(result=denial, is_error=True)
+
         cli = self._make_cli(request)
         logger.info(
             "CLI streaming starting label=%s model=%s",
@@ -427,7 +441,8 @@ class CLIService:
                 max_turns=self._config.max_turns,
                 max_budget_usd=self._config.max_budget_usd,
                 permission_mode=self._config.permission_mode,
-                reasoning_effort=self._config.reasoning_effort,
+                reasoning_effort=request.reasoning_effort_override
+                or self._config.reasoning_effort,
                 gemini_api_key=self._config.gemini_api_key,
                 docker_container=self._config.docker_container,
                 process_registry=self._process_registry,
@@ -441,6 +456,26 @@ class CLIService:
                 transcribe_command=self._config.transcribe_command,
                 video_transcribe_command=self._config.video_transcribe_command,
             )
+        )
+
+    def _policy_denial(self, request: AgentRequest) -> str | None:
+        """Return model-policy denial text for this request, if any."""
+        provider, model = self.resolve_provider(request)
+        user_id = subject_id_for_request(request.user_id, request.chat_id, request.transport)
+        resolved = resolve_model_policy(self._config.model_policy, user_id)
+        if (
+            resolved.enabled
+            and not resolved.allow_model_switch
+            and request.model_override
+            and not request.model_policy_selected
+        ):
+            return model_switch_denied_text()
+        return request_policy_denial_for_policy(
+            self._config.model_policy,
+            user_id,
+            model,
+            provider=provider,
+            reasoning_effort=request.reasoning_effort_override or self._config.reasoning_effort,
         )
 
     def _log_call(self, request: AgentRequest, response: AgentResponse, elapsed_ms: float) -> None:

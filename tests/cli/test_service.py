@@ -10,7 +10,7 @@ from ductor_bot.cli.process_registry import ProcessRegistry
 from ductor_bot.cli.service import CLIService, CLIServiceConfig
 from ductor_bot.cli.stream_events import AssistantTextDelta, ResultEvent, StreamEvent, ToolUseEvent
 from ductor_bot.cli.types import AgentRequest, CLIResponse
-from ductor_bot.config import ModelRegistry
+from ductor_bot.config import ModelPolicyConfig, ModelPolicyRule, ModelRegistry
 
 
 def _make_service(**overrides: Any) -> CLIService:
@@ -21,6 +21,7 @@ def _make_service(**overrides: Any) -> CLIService:
         max_turns=overrides.pop("max_turns", None),
         max_budget_usd=overrides.pop("max_budget_usd", None),
         permission_mode=overrides.pop("permission_mode", "bypassPermissions"),
+        model_policy=overrides.pop("model_policy", ModelPolicyConfig()),
     )
     models = ModelRegistry()
 
@@ -65,6 +66,22 @@ async def test_execute_error_response() -> None:
 
     assert resp.is_error is True
     assert resp.result == "Error occurred"
+
+
+async def test_execute_rejects_model_policy_violation() -> None:
+    svc = _make_service(
+        model_policy=ModelPolicyConfig(
+            enabled=True,
+            default=ModelPolicyRule(allowed_models=["sonnet"]),
+        )
+    )
+
+    with patch("ductor_bot.cli.service.create_cli") as mock_create:
+        resp = await svc.execute(AgentRequest(prompt="hello", chat_id=1, user_id=99))
+
+    assert resp.is_error is True
+    assert "not allowed" in resp.result
+    mock_create.assert_not_called()
 
 
 async def test_execute_streaming_success() -> None:

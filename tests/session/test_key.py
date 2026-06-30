@@ -37,6 +37,10 @@ class TestStorageKey:
         key = SessionKey(transport="api", chat_id=1, topic_id=5)
         assert key.storage_key == "api:1:5"
 
+    def test_user_id_is_not_persisted_in_storage_key(self) -> None:
+        key = SessionKey(transport="tg", chat_id=-100123, topic_id=45, user_id=999)
+        assert key.storage_key == "tg:-100123:45"
+
 
 class TestParse:
     def test_prefixed_telegram(self) -> None:
@@ -105,6 +109,12 @@ class TestLockKey:
         tg = SessionKey(transport="tg", chat_id=123)
         mx = SessionKey(transport="mx", chat_id=123)
         assert tg.lock_key == mx.lock_key
+
+    def test_user_id_does_not_change_identity_or_lock_key(self) -> None:
+        a = SessionKey(transport="tg", chat_id=-100123, topic_id=45, user_id=1)
+        b = SessionKey(transport="tg", chat_id=-100123, topic_id=45, user_id=2)
+        assert a == b
+        assert a.lock_key == b.lock_key
 
     def test_different_lock_key_different_chat(self) -> None:
         a = SessionKey(transport="tg", chat_id=1)

@@ -16,6 +16,19 @@ from ductor_bot.config import (
     update_config_file_async,
 )
 from ductor_bot.i18n import t
+from ductor_bot.model_policy import (
+    can_switch_models,
+    filter_allowed_models,
+    filter_allowed_reasoning_efforts,
+    is_model_allowed,
+    is_reasoning_effort_allowed,
+    model_denied_text,
+    model_switch_denied_text,
+    no_models_available_text,
+    no_reasoning_efforts_available_text,
+    reasoning_denied_text,
+    subject_id_for_key,
+)
 from ductor_bot.multiagent.registry import update_agent_fields
 from ductor_bot.orchestrator.selectors.models import Button, ButtonGrid, SelectorResponse
 
@@ -173,6 +186,57 @@ def _chunk_buttons(
     return rows
 
 
+def _provider_has_allowed_models(
+    orch: Orchestrator,
+    user_id: int | None,
+    provider: str,
+    codex_cache: CodexModelCache | None = None,
+) -> bool:
+    """Return whether a provider has at least one model visible to this user."""
+    if provider == "claude":
+        return bool(
+            filter_allowed_models(
+                orch._config,
+                user_id,
+                list(CLAUDE_MODELS_ORDERED),
+                provider="claude",
+            )
+        )
+    if provider == "gemini":
+        return bool(
+            filter_allowed_models(
+                orch._config,
+                user_id,
+                _gemini_models_for_selector(),
+                provider="gemini",
+            )
+        )
+    if provider == "antigravity":
+        return bool(
+            filter_allowed_models(
+                orch._config,
+                user_id,
+                _antigravity_models_for_selector(),
+                provider="antigravity",
+            )
+        )
+    if provider == "codex" and codex_cache is not None:
+        return any(
+            is_model_allowed(orch._config, user_id, model.id, provider="codex")
+            for model in codex_cache.models
+        )
+    return True
+
+
+def _no_allowed_models_response(header: str) -> SelectorResponse:
+    keyboard = ButtonGrid(
+        rows=[
+            [Button(text=t("model.btn_back"), callback_data="ms:b:root")],
+        ]
+    )
+    return SelectorResponse(text=f"{header}\n\n{no_models_available_text()}", buttons=keyboard)
+
+
 def is_model_selector_callback(data: str) -> bool:
     """Return True if *data* belongs to the model selector wizard."""
     return data.startswith(MS_PREFIX)
@@ -192,22 +256,34 @@ async def model_selector_start(
     Returns a ``SelectorResponse``. Buttons are ``None`` when no providers
     are authenticated.
     """
+    user_id = subject_id_for_key(key)
     auth = await asyncio.to_thread(check_all_auth)
-    authed = [name for name, res in auth.items() if res.status == AuthStatus.AUTHENTICATED]
+    codex_cache = (
+        orch._observers.codex_cache_obs.get_cache() if orch._observers.codex_cache_obs else None
+    )
+    authenticated = [
+        name for name, res in auth.items() if res.status == AuthStatus.AUTHENTICATED
+    ]
+    authed = [
+        name
+        for name in authenticated
+        if _provider_has_allowed_models(orch, user_id, name, codex_cache)
+    ]
 
     header = await _status_line(orch, key)
+    if not can_switch_models(orch._config, user_id):
+        return SelectorResponse(text=f"{header}\n\n{model_switch_denied_text()}")
 
     if not authed:
+        if authenticated:
+            return SelectorResponse(text=f"{header}\n\n{no_models_available_text()}")
         return SelectorResponse(
             text=f"{header}\n\n{t('model.no_auth')}",
         )
 
     if len(authed) == 1:
         provider = authed[0]
-        codex_cache = (
-            orch._observers.codex_cache_obs.get_cache() if orch._observers.codex_cache_obs else None
-        )
-        return await _build_model_step(provider, header, codex_cache)
+        return await _build_model_step(orch, key, provider, header, codex_cache)
 
     buttons: list[Button] = []
     if "claude" in authed:
@@ -224,7 +300,7 @@ async def model_selector_start(
     return SelectorResponse(text=f"{header}\n\n{t('model.pick_provider')}", buttons=keyboard)
 
 
-async def handle_model_callback(
+async def handle_model_callback(  # noqa: PLR0911
     orch: Orchestrator,
     key: SessionKey,
     data: str,
@@ -242,9 +318,13 @@ async def handle_model_callback(
     codex_cache = (
         orch._observers.codex_cache_obs.get_cache() if orch._observers.codex_cache_obs else None
     )
+    if not can_switch_models(orch._config, subject_id_for_key(key)):
+        return SelectorResponse(text=model_switch_denied_text())
 
     if action == "p":
-        return await _build_model_step(payload, await _status_line(orch, key), codex_cache)
+        return await _build_model_step(
+            orch, key, payload, await _status_line(orch, key), codex_cache
+        )
 
     if action == "m":
         return await _handle_model_selected(orch, key, payload, codex_cache)
@@ -255,13 +335,15 @@ async def handle_model_callback(
     if action == "b":
         if payload == "root":
             return await model_selector_start(orch, key)
-        return await _build_model_step(payload, await _status_line(orch, key), codex_cache)
+        return await _build_model_step(
+            orch, key, payload, await _status_line(orch, key), codex_cache
+        )
 
     logger.warning("Unknown model selector callback: %s", data)
     return SelectorResponse(text=t("model.unknown_action"))
 
 
-async def switch_model(  # noqa: C901
+async def switch_model(  # noqa: C901, PLR0912
     orch: Orchestrator,
     key: SessionKey,
     model_id: str,
@@ -272,6 +354,20 @@ async def switch_model(  # noqa: C901
 
     Shared by ``/model <name>`` text command and the wizard callbacks.
     """
+    user_id = subject_id_for_key(key)
+    if not can_switch_models(orch._config, user_id):
+        return model_switch_denied_text()
+
+    new_provider = orch.models.provider_for(model_id)
+    if not is_model_allowed(orch._config, user_id, model_id, provider=new_provider):
+        return model_denied_text(model_id)
+    if (
+        reasoning_effort
+        and new_provider == "codex"
+        and not is_reasoning_effort_allowed(orch._config, user_id, reasoning_effort)
+    ):
+        return reasoning_denied_text(reasoning_effort)
+
     is_topic = key.topic_id is not None
     active_session = await orch._sessions.get_active(key)
 
@@ -283,7 +379,6 @@ async def switch_model(  # noqa: C901
         return t("model.already_running", model=model_id)
 
     old_provider = orch.models.provider_for(old)
-    new_provider = orch.models.provider_for(model_id)
     provider_changed = old_provider != new_provider
 
     validation_error = _validate_codex_reasoning_effort(orch, model_id, reasoning_effort)
@@ -385,14 +480,25 @@ async def _status_line(orch: Orchestrator, key: SessionKey) -> str:
     return current
 
 
-async def _build_model_step(
+async def _build_model_step(  # noqa: PLR0911
+    orch: Orchestrator,
+    key: SessionKey,
     provider: str,
     header: str,
     codex_cache: CodexModelCache | None = None,
 ) -> SelectorResponse:
     """Build the model selection keyboard for a provider."""
+    user_id = subject_id_for_key(key)
     if provider == "claude":
-        buttons = [Button(text=m.upper(), callback_data=f"ms:m:{m}") for m in CLAUDE_MODELS_ORDERED]
+        model_ids = filter_allowed_models(
+            orch._config,
+            user_id,
+            list(CLAUDE_MODELS_ORDERED),
+            provider="claude",
+        )
+        if not model_ids:
+            return _no_allowed_models_response(header)
+        buttons = [Button(text=m.upper(), callback_data=f"ms:m:{m}") for m in model_ids]
         keyboard = ButtonGrid(
             rows=[
                 buttons,
@@ -402,7 +508,12 @@ async def _build_model_step(
         return SelectorResponse(text=f"{header}\n\n{t('model.select_claude')}", buttons=keyboard)
 
     if provider == "gemini":
-        gemini_models = _gemini_models_for_selector()
+        gemini_models = filter_allowed_models(
+            orch._config,
+            user_id,
+            _gemini_models_for_selector(),
+            provider="gemini",
+        )
         if not gemini_models:
             keyboard = ButtonGrid(
                 rows=[
@@ -420,7 +531,15 @@ async def _build_model_step(
         return SelectorResponse(text=f"{header}\n\n{t('model.select_gemini')}", buttons=keyboard)
 
     if provider == "antigravity":
-        antigravity_rows = _chunk_buttons(_antigravity_models_for_selector(), columns=1)
+        antigravity_models = filter_allowed_models(
+            orch._config,
+            user_id,
+            _antigravity_models_for_selector(),
+            provider="antigravity",
+        )
+        if not antigravity_models:
+            return _no_allowed_models_response(header)
+        antigravity_rows = _chunk_buttons(antigravity_models, columns=1)
         antigravity_rows.append([Button(text=t("model.btn_back"), callback_data="ms:b:root")])
         keyboard = ButtonGrid(rows=antigravity_rows)
         return SelectorResponse(
@@ -428,7 +547,11 @@ async def _build_model_step(
         )
 
     # Use cache instead of live discovery
-    codex_models = codex_cache.models if codex_cache else []
+    codex_models = [
+        m
+        for m in (codex_cache.models if codex_cache else [])
+        if is_model_allowed(orch._config, user_id, m.id, provider="codex")
+    ]
     if not codex_models:
         keyboard = ButtonGrid(
             rows=[
@@ -453,7 +576,10 @@ async def _handle_model_selected(
     codex_cache: CodexModelCache | None = None,
 ) -> SelectorResponse:
     """Handle a model button press. Codex shows reasoning; other providers switch directly."""
+    user_id = subject_id_for_key(key)
     provider = orch.models.provider_for(model_id)
+    if not is_model_allowed(orch._config, user_id, model_id, provider=provider):
+        return SelectorResponse(text=model_denied_text(model_id))
 
     if provider in ("claude", "gemini", "antigravity"):
         result = await switch_model(orch, key, model_id)
@@ -462,6 +588,9 @@ async def _handle_model_selected(
     # Use cache instead of live discovery
     codex_info = codex_cache.get_model(model_id) if codex_cache else None
     efforts = codex_info.supported_efforts if codex_info else ("low", "medium", "high", "xhigh")
+    efforts = filter_allowed_reasoning_efforts(orch._config, user_id, efforts)
+    if not efforts:
+        return SelectorResponse(text=no_reasoning_efforts_available_text())
 
     buttons = [
         Button(

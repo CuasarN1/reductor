@@ -44,7 +44,9 @@ def get_session_key(message: Message) -> SessionKey:
             message.message_thread_id,
             topic_id,
         )
-    return SessionKey.telegram(chat_id=message.chat.id, topic_id=topic_id)
+    from_user = getattr(message, "from_user", None)
+    user_id = from_user.id if from_user is not None else None
+    return SessionKey.telegram(chat_id=message.chat.id, topic_id=topic_id, user_id=user_id)
 
 
 def get_topic_name_from_message(message: Message) -> str | None:

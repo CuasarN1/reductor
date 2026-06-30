@@ -89,6 +89,7 @@ Changes take effect on the next CLI invocation (mtime-based cache invalidation, 
 | `allowed_group_ids` | `list[int]` | `[]` | Telegram group allowlist (which groups the bot can operate in; default `[]` = no groups, fail-closed). In groups, both the group and the user must be allowlisted |
 | `allowed_channel_ids` | `list[int]` | `[]` | Telegram channel allowlist for join/audit behavior; unauthorized channels are auto-left |
 | `group_mention_only` | `bool` | `false` | Mention/reply gating in group rooms. Telegram: filter only (no auth bypass). Matrix: in non-DM rooms this bypasses `allowed_users` and uses room + mention/reply as gate |
+| `model_policy` | `ModelPolicyConfig` | disabled | Optional per-Telegram-user model/reasoning restrictions |
 | `matrix` | `MatrixConfig` | see below | Matrix homeserver connection (required when `transport=matrix`) |
 | `streaming` | `StreamingConfig` | see below | Streaming tuning |
 | `docker` | `DockerConfig` | see below | Docker sidecar config |
@@ -509,7 +510,7 @@ Hot-reloadable top-level fields:
 - `cli_timeout`, `max_budget_usd`, `max_turns`, `max_session_messages`
 - `idle_timeout_minutes`, `session_age_warning_hours`, `daily_reset_hour`, `daily_reset_enabled`
 - `permission_mode`, `file_access`, `user_timezone`
-- `streaming`, `heartbeat`, `cleanup`, `cli_parameters`, `scene`, `image`, `language`
+- `streaming`, `heartbeat`, `cleanup`, `cli_parameters`, `model_policy`, `scene`, `image`, `language`
 - `allowed_user_ids`, `allowed_group_ids`, `group_mention_only`
 
 Current non-hot fields that often surprise people:
@@ -572,6 +573,42 @@ Main-chat flow:
 Automation flow:
 
 - `resolve_cli_config()` applies reasoning effort only for Codex models that support the requested effort.
+
+## `model_policy`
+
+Disabled by default. When enabled, Ductor evaluates the effective Telegram user ID
+(`message.from_user.id`, including in groups) before model selection or CLI execution.
+
+Example:
+
+```json
+{
+  "model_policy": {
+    "enabled": true,
+    "default": {
+      "allowed_models": ["gpt-5.4-mini"],
+      "allowed_reasoning_efforts": ["low", "medium"],
+      "allow_model_switch": false
+    },
+    "users": {
+      "123456789": {
+        "allowed_models": ["*"],
+        "allowed_reasoning_efforts": ["*"],
+        "allow_model_switch": true
+      }
+    }
+  }
+}
+```
+
+Rules:
+
+- `default` applies to every user unless a `users["<telegram_user_id>"]` entry overrides a field.
+- `allowed_models` supports exact model IDs, `"*"`, prefix patterns like `"gpt-5.4*"`, and provider patterns like `"codex:*"` or `"provider:claude"`.
+- For users with `allow_model_switch=false`, exact `allowed_models` entries are treated as an ordered auto-router list: put cheaper/preferred models first and stronger fallbacks later.
+- `allowed_reasoning_efforts` applies to Codex requests only.
+- `allow_model_switch=false` disables manual model choice for that user: `/model`, selector callbacks, `@model`, and `/session @provider/model` are rejected. Ordinary messages and `/session <prompt>` are routed automatically within the allowed list.
+- Enforcement happens in `/model`, inline selector callbacks, `@model` directives, `/session`, named-session follow-ups, and `CLIService`.
 
 ## Codex Model Cache
 

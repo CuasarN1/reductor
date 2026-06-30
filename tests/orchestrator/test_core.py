@@ -10,9 +10,9 @@ import pytest
 from ductor_bot.bus.bus import MessageBus
 from ductor_bot.cli.auth import AuthResult, AuthStatus
 from ductor_bot.cli.types import AgentResponse
-from ductor_bot.config import AgentConfig
+from ductor_bot.config import AgentConfig, ModelPolicyConfig, ModelPolicyRule
 from ductor_bot.errors import CLIError, CronError, SessionError, StreamError, WorkspaceError
-from ductor_bot.orchestrator.core import Orchestrator
+from ductor_bot.orchestrator.core import NamedSessionRequest, Orchestrator
 from ductor_bot.session.key import SessionKey
 from ductor_bot.workspace.paths import DuctorPaths
 
@@ -219,6 +219,126 @@ async def test_directive_with_text(orch: Orchestrator) -> None:
     request = mock_execute.call_args[0][0]
     assert request.model_override == "sonnet"
     assert request.prompt.startswith("Hello")
+
+
+async def test_directive_rejects_manual_model_selection(orch: Orchestrator) -> None:
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        default=ModelPolicyRule(allowed_models=["sonnet"]),
+    )
+    mock_execute = AsyncMock(return_value=_mock_response())
+    object.__setattr__(orch._cli_service, "execute", mock_execute)
+
+    result = await orch.handle_message(SessionKey(chat_id=-100, user_id=99), "@opus Hello")
+
+    assert "Manual model selection is disabled" in result.text
+    mock_execute.assert_not_called()
+
+
+async def test_default_model_policy_auto_selects_allowed_model(orch: Orchestrator) -> None:
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        default=ModelPolicyRule(allowed_models=["sonnet"]),
+    )
+    mock_execute = AsyncMock(return_value=_mock_response())
+    object.__setattr__(orch._cli_service, "execute", mock_execute)
+
+    result = await orch.handle_message(SessionKey(chat_id=-100, user_id=99), "Hello")
+
+    request = mock_execute.call_args[0][0]
+    assert result.text == "Response text"
+    assert request.model_override == "sonnet"
+    assert request.model_policy_selected is True
+
+
+async def test_user_model_policy_override_allows_owner(orch: Orchestrator) -> None:
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        default=ModelPolicyRule(allowed_models=["sonnet"]),
+        users={
+            "1": ModelPolicyRule(
+                allowed_models=["*"],
+                allowed_reasoning_efforts=["*"],
+                allow_model_switch=True,
+            )
+        },
+    )
+    mock_execute = AsyncMock(return_value=_mock_response())
+    object.__setattr__(orch._cli_service, "execute", mock_execute)
+
+    result = await orch.handle_message(SessionKey(chat_id=-100, user_id=1), "Hello")
+
+    assert result.text == "Response text"
+    mock_execute.assert_called_once()
+
+
+def test_submit_named_session_rejects_disallowed_model(orch: Orchestrator) -> None:
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        default=ModelPolicyRule(allowed_models=["sonnet"]),
+    )
+    orch._observers.background = MagicMock()
+
+    with pytest.raises(ValueError, match="Manual model selection is disabled"):
+        orch.submit_named_session(
+            -100,
+            "Run this",
+            NamedSessionRequest(
+                message_id=10,
+                thread_id=None,
+                user_id=99,
+                provider_override="claude",
+                model_override="opus",
+            ),
+        )
+
+
+def test_submit_named_session_passes_user_id_to_background(orch: Orchestrator) -> None:
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        default=ModelPolicyRule(allowed_models=["sonnet"]),
+        users={"1": ModelPolicyRule(allowed_models=["*"], allow_model_switch=True)},
+    )
+    background = MagicMock()
+    background.submit.return_value = "task-1"
+    orch._observers.background = background
+
+    task_id, _session_name = orch.submit_named_session(
+        -100,
+        "Run this",
+        NamedSessionRequest(
+            message_id=10,
+            thread_id=None,
+            user_id=1,
+            provider_override="claude",
+            model_override="opus",
+        ),
+    )
+
+    submitted = background.submit.call_args[0][0]
+    assert task_id == "task-1"
+    assert submitted.user_id == 1
+
+
+def test_submit_named_session_auto_selects_policy_model(orch: Orchestrator) -> None:
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        default=ModelPolicyRule(allowed_models=["sonnet", "opus"]),
+    )
+    background = MagicMock()
+    background.submit.return_value = "task-1"
+    orch._observers.background = background
+
+    task_id, _session_name = orch.submit_named_session(
+        -100,
+        "Please implement and test this change",
+        NamedSessionRequest(message_id=10, thread_id=None, user_id=99),
+    )
+
+    submitted = background.submit.call_args[0][0]
+    assert task_id == "task-1"
+    assert submitted.model_override == "opus"
+    assert submitted.model_policy_selected is True
 
 
 # -- streaming --
