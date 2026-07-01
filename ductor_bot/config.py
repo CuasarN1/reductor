@@ -257,6 +257,7 @@ class ModelPolicyConfig(BaseModel):
     """Optional per-user restrictions for model selection and Codex reasoning."""
 
     enabled: bool = False
+    admin_user_ids: list[int] = Field(default_factory=list)
     default: ModelPolicyRule = Field(default_factory=ModelPolicyRule)
     users: dict[str, ModelPolicyRule] = Field(default_factory=dict)
 

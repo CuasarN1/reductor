@@ -760,7 +760,8 @@ class MatrixBot:
             SEP,
             f"**{t('help.cat_daily')}**\n{_line('new')}\n{_line('reset')}\n{_line('stop')}\n"
             f"{_line('stop_all')}\n{_line('model')}\n{_line('status')}\n{_line('memory')}",
-            f"**{t('help.cat_automation')}**\n{_line('session')}\n{_line('tasks')}\n{_line('cron')}",
+            f"**{t('help.cat_automation')}**\n{_line('session')}\n{_line('tasks')}\n"
+            f"{_line('cron')}\n{_line('access')}",
             f"**{t('help.cat_multiagent')}**\n{_line('agent_commands')}\n{_line('agents')}\n"
             f"{_line('agent_start')}\n{_line('agent_stop')}\n{_line('agent_restart')}",
             f"**{t('help.cat_browse')}**\n{_line('showfiles')}\n{_line('info')}\n{_line('help')}",

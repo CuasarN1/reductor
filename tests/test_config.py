@@ -49,6 +49,7 @@ def test_model_policy_config_accepts_user_rules() -> None:
     cfg = AgentConfig(
         model_policy=ModelPolicyConfig(
             enabled=True,
+            admin_user_ids=[123],
             default=ModelPolicyRule(
                 allowed_models=["gpt-5.4-mini"],
                 allowed_reasoning_efforts=["low", "medium"],
@@ -65,6 +66,7 @@ def test_model_policy_config_accepts_user_rules() -> None:
     )
 
     assert cfg.model_policy.enabled is True
+    assert cfg.model_policy.admin_user_ids == [123]
     assert cfg.model_policy.default.allowed_models == ["gpt-5.4-mini"]
     assert cfg.model_policy.users["123"].allowed_models == ["*"]
 

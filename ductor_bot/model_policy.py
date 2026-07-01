@@ -84,6 +84,15 @@ def can_switch_models(config: AgentConfig, user_id: int | None) -> bool:
     return resolve_model_policy(config.model_policy, user_id).allow_model_switch
 
 
+def is_model_policy_admin(config: AgentConfig, user_id: int | None) -> bool:
+    """Return whether this user may manage bot access and model policy."""
+    if user_id is None:
+        return False
+    if config.allowed_user_ids and user_id == config.allowed_user_ids[0]:
+        return True
+    return user_id in config.model_policy.admin_user_ids
+
+
 def is_model_allowed(
     config: AgentConfig,
     user_id: int | None,

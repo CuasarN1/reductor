@@ -196,6 +196,10 @@ class CLIService:
         """Update the default reasoning effort after wizard selection."""
         self._config = replace(self._config, reasoning_effort=effort)
 
+    def update_model_policy(self, policy: ModelPolicyConfig) -> None:
+        """Update per-user model policy after access-management changes."""
+        self._config = replace(self._config, model_policy=policy)
+
     def update_config(self, config: CLIServiceConfig) -> None:
         """Replace the full service config (used by config hot-reload)."""
         self._config = config

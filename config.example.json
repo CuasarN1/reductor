@@ -28,6 +28,7 @@
     "group_mention_only": false,
     "model_policy": {
         "enabled": false,
+        "admin_user_ids": [123456789],
         "default": {
             "allowed_models": ["gpt-5.4-mini"],
             "allowed_reasoning_efforts": ["low", "medium"],

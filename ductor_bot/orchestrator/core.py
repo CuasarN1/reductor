@@ -34,6 +34,7 @@ from ductor_bot.model_policy import (
     select_model_target_for_prompt,
     subject_id_for_key,
 )
+from ductor_bot.orchestrator.access_admin import cmd_access
 from ductor_bot.orchestrator.commands import (
     cmd_cron,
     cmd_diagnose,
@@ -447,6 +448,8 @@ class Orchestrator:
         reg.register_async("/upgrade", cmd_upgrade)
         reg.register_async("/sessions", cmd_sessions)
         reg.register_async("/tasks", cmd_tasks)
+        reg.register_async("/access", cmd_access)
+        reg.register_async("/access ", cmd_access)
 
     def register_multiagent_commands(self) -> None:
         """Register /agents, /agent_start, /agent_stop, /agent_restart commands.

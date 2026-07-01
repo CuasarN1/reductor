@@ -585,6 +585,7 @@ Example:
 {
   "model_policy": {
     "enabled": true,
+    "admin_user_ids": [123456789],
     "default": {
       "allowed_models": ["gpt-5.4-mini"],
       "allowed_reasoning_efforts": ["low", "medium"],
@@ -603,12 +604,24 @@ Example:
 
 Rules:
 
+- `admin_user_ids` lists users who may manage access through `/access`. The first
+  `allowed_user_ids` entry is always treated as an owner-admin for backward
+  compatibility and lockout protection.
 - `default` applies to every user unless a `users["<telegram_user_id>"]` entry overrides a field.
 - `allowed_models` supports exact model IDs, `"*"`, prefix patterns like `"gpt-5.4*"`, and provider patterns like `"codex:*"` or `"provider:claude"`.
 - For users with `allow_model_switch=false`, exact `allowed_models` entries are treated as an ordered auto-router list: put cheaper/preferred models first and stronger fallbacks later.
 - `allowed_reasoning_efforts` applies to Codex requests only.
 - `allow_model_switch=false` disables manual model choice for that user: `/model`, selector callbacks, `@model`, and `/session @provider/model` are rejected. Ordinary messages and `/session <prompt>` are routed automatically within the allowed list.
 - Enforcement happens in `/model`, inline selector callbacks, `@model` directives, `/session`, named-session follow-ups, and `CLIService`.
+
+Bot access commands:
+
+- `/access list`
+- `/access add <telegram_user_id> models=gpt-5.4-mini,gpt-5.4 efforts=low,medium switch=off`
+- `/access policy <telegram_user_id> models=* efforts=* switch=on`
+- `/access default models=gpt-5.4-mini efforts=low,medium switch=off`
+- `/access admin <telegram_user_id> on|off`
+- `/access remove <telegram_user_id>`
 
 ## Codex Model Cache
 
