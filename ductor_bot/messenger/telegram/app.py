@@ -421,6 +421,8 @@ class TelegramBot:
         if self._outbox_drain_task is None or self._outbox_drain_task.done():
             root = outbox_dir(self._orch.paths.ductor_home)
             self._outbox_drain_task = asyncio.create_task(drain_loop(self._bot, root))
+        if self._restart_watcher is None or self._restart_watcher.done():
+            self._restart_watcher = asyncio.create_task(self._watch_restart_marker())
 
     def _register_handlers(self) -> None:
         r = self._router

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
@@ -186,6 +187,26 @@ class TestTelegramBotInit:
 
 
 class TestTelegramBotRun:
+    async def test_startup_starts_restart_watcher(self) -> None:
+        tg_bot, _ = _make_tg_bot()
+        tg_bot._orchestrator = _make_orchestrator()
+
+        async def watch_marker() -> None:
+            await asyncio.sleep(100)
+
+        with (
+            patch("ductor_bot.messenger.telegram.startup.run_startup", new_callable=AsyncMock),
+            patch.object(tg_bot, "_watch_restart_marker", side_effect=watch_marker) as mock_watch,
+        ):
+            await tg_bot._on_startup()
+
+        assert tg_bot._restart_watcher is not None
+        assert not tg_bot._restart_watcher.done()
+        mock_watch.assert_called_once()
+        tg_bot._restart_watcher.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await tg_bot._restart_watcher
+
     async def test_run_returns_exit_code(self) -> None:
         tg_bot, bot_instance = _make_tg_bot()
         tg_bot._dp.resolve_used_update_types = MagicMock(return_value=["message", "callback_query"])
