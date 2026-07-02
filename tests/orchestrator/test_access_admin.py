@@ -59,6 +59,21 @@ async def test_owner_adds_user_by_username(orch: Orchestrator) -> None:
     assert orch._config.allowed_user_ids == [1, 222]
 
 
+async def test_access_list_shows_known_usernames(orch: Orchestrator) -> None:
+    orch._config.allowed_user_ids = [1, 222, 333]
+    orch._config.model_policy.admin_user_ids = [222]
+    known_users = {1: "@owner", 222: "@somebody"}
+    orch.set_access_user_describer(known_users.get)
+
+    result = await cmd_access(orch, SessionKey(chat_id=1, user_id=1), "/access list")
+
+    assert "- owner: `@owner` (`1`)" in result.text
+    assert "- admins: `@somebody` (`222`)" in result.text
+    assert "- `@owner` (`1`) (owner):" in result.text
+    assert "- `@somebody` (`222`) (admin):" in result.text
+    assert "- `333`:" in result.text
+
+
 async def test_owner_add_username_reports_unresolved(orch: Orchestrator) -> None:
     orch._config.allowed_user_ids = [1]
     orch.set_access_user_resolver(AsyncMock(return_value=None))

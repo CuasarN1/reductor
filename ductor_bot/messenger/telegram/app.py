@@ -528,6 +528,19 @@ class TelegramBot:
         chat_id = getattr(chat, "id", None)
         return int(chat_id) if isinstance(chat_id, int) and chat_id > 0 else None
 
+    def _describe_access_user(self, user_id: int) -> str | None:
+        """Return a readable user label for /access list."""
+        if not self._chat_tracker:
+            return None
+        rec = self._chat_tracker.get_user(user_id)
+        if rec is None:
+            return None
+        username = rec.username.lstrip("@")
+        if username:
+            return f"@{username}"
+        name = " ".join(part for part in (rec.first_name, rec.last_name) if part).strip()
+        return name or None
+
     async def _on_bot_added(self, event: ChatMemberUpdated) -> None:
         """Bot was added to a group or channel."""
         chat = event.chat

@@ -102,6 +102,7 @@ _TextCallback = Callable[[str], Awaitable[None]]
 _SystemStatusCallback = Callable[[str | None], Awaitable[None]]
 _ReasoningCallback = Callable[[str], Awaitable[None]]
 _AccessUserResolver = Callable[[str], Awaitable[int | None]]
+_AccessUserDescriber = Callable[[int], str | None]
 
 
 @dataclass(slots=True)
@@ -226,6 +227,7 @@ class Orchestrator:
         self._supervisor: AgentSupervisor | None = None  # Set by AgentSupervisor after creation
         self._task_hub: TaskHub | None = None  # Set by supervisor or __main__.py
         self._access_user_resolver: _AccessUserResolver | None = None
+        self._access_user_describer: _AccessUserDescriber | None = None
         self._command_registry = CommandRegistry()
         self._register_commands()
 
@@ -292,11 +294,21 @@ class Orchestrator:
         """Inject a transport-specific username -> user id resolver for /access."""
         self._access_user_resolver = resolver
 
+    def set_access_user_describer(self, describer: _AccessUserDescriber | None) -> None:
+        """Inject a transport-specific user id -> display label resolver for /access."""
+        self._access_user_describer = describer
+
     async def resolve_access_username(self, username: str) -> int | None:
         """Resolve a username for access commands when the transport supports it."""
         if self._access_user_resolver is None:
             return None
         return await self._access_user_resolver(username)
+
+    def describe_access_user(self, user_id: int) -> str | None:
+        """Return a human-readable access-list label for a user id, if known."""
+        if self._access_user_describer is None:
+            return None
+        return self._access_user_describer(user_id)
 
     @classmethod
     async def create(

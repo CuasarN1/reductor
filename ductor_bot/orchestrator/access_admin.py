@@ -336,6 +336,18 @@ def _format_rule(rule: ModelPolicyRule | None) -> str:
     )
 
 
+def _code(value: object) -> str:
+    text = str(value).replace("`", "'")
+    return f"`{text}`"
+
+
+def _format_user_ref(orch: Orchestrator, user_id: int) -> str:
+    label = orch.describe_access_user(user_id)
+    if not label:
+        return _code(user_id)
+    return f"{_code(label)} ({_code(user_id)})"
+
+
 def _format_effective_user(orch: Orchestrator, user_id: int) -> str:
     tags: list[str] = []
     if user_id == _owner_id(orch):
@@ -344,16 +356,17 @@ def _format_effective_user(orch: Orchestrator, user_id: int) -> str:
         tags.append("admin")
     tag_text = f" ({', '.join(tags)})" if tags else ""
     rule = orch._config.model_policy.users.get(str(user_id))
-    return f"- `{user_id}`{tag_text}: {_format_rule(rule)}"
+    return f"- {_format_user_ref(orch, user_id)}{tag_text}: {_format_rule(rule)}"
 
 
 def _list_access(orch: Orchestrator) -> str:
     policy = orch._config.model_policy
+    owner_id = _owner_id(orch)
     lines = [
         "Access",
         f"- policy: {'on' if policy.enabled else 'off'}",
-        f"- owner: `{_owner_id(orch)}`" if _owner_id(orch) is not None else "- owner: none",
-        f"- admins: {_format_admins(policy.admin_user_ids)}",
+        f"- owner: {_format_user_ref(orch, owner_id)}" if owner_id is not None else "- owner: none",
+        f"- admins: {_format_admins(orch, policy.admin_user_ids)}",
         f"- default: {_format_rule(policy.default)}",
         "",
         "Users:",
@@ -361,7 +374,9 @@ def _list_access(orch: Orchestrator) -> str:
     if not orch._config.allowed_user_ids:
         lines.append("- none")
     else:
-        lines.extend(_format_effective_user(orch, user_id) for user_id in orch._config.allowed_user_ids)
+        lines.extend(
+            _format_effective_user(orch, user_id) for user_id in orch._config.allowed_user_ids
+        )
     lines.extend(["", "Groups:"])
     if not orch._config.allowed_group_ids:
         lines.append("- none")
@@ -370,10 +385,10 @@ def _list_access(orch: Orchestrator) -> str:
     return "\n".join(lines)
 
 
-def _format_admins(admins: list[int]) -> str:
+def _format_admins(orch: Orchestrator, admins: list[int]) -> str:
     if not admins:
         return "none"
-    return ", ".join(f"`{user_id}`" for user_id in admins)
+    return ", ".join(_format_user_ref(orch, user_id) for user_id in admins)
 
 
 async def _list_access_result(orch: Orchestrator, args: list[str]) -> OrchestratorResult:

@@ -172,6 +172,10 @@ class ChatTracker:
                 return rec.user_id
         return None
 
+    def get_user(self, user_id: int) -> UserRecord | None:
+        """Return a previously seen Telegram user record by id."""
+        return self._users.get(user_id)
+
     # -- Persistence ----------------------------------------------------------
 
     def _load(self) -> None:

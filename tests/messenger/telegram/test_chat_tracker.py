@@ -80,6 +80,9 @@ class TestChatTracker:
         tracker.record_user(222, username="somebody", first_name="", allowed=True)
 
         assert tracker.resolve_username("somebody") == 222
+        rec = tracker.get_user(222)
+        assert rec is not None
+        assert rec.username == "somebody"
         assert tracker._users[222].first_name == "Some"
         assert tracker._users[222].allowed is True
 
