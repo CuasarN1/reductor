@@ -594,6 +594,10 @@ def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
     return any(term in text for term in terms)
 
 
+def _contains_digit(text: str) -> bool:
+    return any(ch.isdigit() for ch in text)
+
+
 def is_access_config_change_request(text: str) -> bool:
     """Return True when text appears to request access allowlist changes."""
     normalized = text.casefold()
@@ -634,10 +638,16 @@ def _is_user_access_change_request(normalized: str) -> bool:
         "авториз",
         "админ",
     )
-    return _contains_any(normalized, access_terms) and _contains_any(
-        normalized,
-        _ACCESS_CHANGE_TERMS,
-    )
+    if not (
+        _contains_any(normalized, access_terms)
+        and _contains_any(normalized, _ACCESS_CHANGE_TERMS)
+    ):
+        return False
+
+    # Avoid treating explanatory/past-tense questions like
+    # "после добавления другого пользователя..." as access changes. Without a
+    # concrete id or a direct imperative, the CLI can safely answer the question.
+    return _contains_digit(normalized) or _contains_any(normalized, _DIRECT_USER_ACCESS_TERMS)
 
 
 def is_group_access_change_request(text: str) -> bool:
@@ -678,13 +688,9 @@ def _is_group_access_change_request(normalized: str) -> bool:
         normalized,
         _ACCESS_CHANGE_TERMS,
     ):
-        return True
+        return _contains_any(normalized, _DIRECT_GROUP_ACCESS_TERMS)
 
-    bot_terms = ("bot", "бот")
-    return _contains_any(normalized, bot_terms) and _contains_any(
-        normalized,
-        _ACCESS_CHANGE_TERMS,
-    )
+    return False
 
 
 _ACCESS_CHANGE_TERMS = (
@@ -703,6 +709,7 @@ _ACCESS_CHANGE_TERMS = (
     "update",
     "добав",
     "выдай",
+    "выдат",
     "измен",
     "одобр",
     "помен",
@@ -713,3 +720,57 @@ _ACCESS_CHANGE_TERMS = (
 )
 
 _CONFIG_KEY_CHANGE_TERMS = tuple(term for term in _ACCESS_CHANGE_TERMS if term != "allow")
+
+_DIRECT_USER_ACCESS_TERMS = (
+    "add user",
+    "allow user",
+    "approve user",
+    "authorize user",
+    "authorise user",
+    "grant access",
+    "remove user",
+    "revoke access",
+    "добавь пользовател",
+    "выдай доступ",
+    "выдать доступ",
+    "дай доступ",
+    "дать доступ",
+    "разреши пользовател",
+    "одобри пользовател",
+    "авторизуй пользовател",
+    "удали пользовател",
+    "отзови доступ",
+)
+
+_DIRECT_GROUP_ACCESS_TERMS = (
+    "add group",
+    "add chat",
+    "allow group",
+    "allow chat",
+    "approve group",
+    "approve chat",
+    "authorize group",
+    "authorize chat",
+    "authorise group",
+    "authorise chat",
+    "grant access",
+    "remove group",
+    "remove chat",
+    "revoke access",
+    "добавь групп",
+    "добавь чат",
+    "выдай доступ",
+    "выдать доступ",
+    "дай доступ",
+    "дать доступ",
+    "разреши групп",
+    "разреши чат",
+    "разреши этому чату",
+    "одобри групп",
+    "одобри чат",
+    "авторизуй групп",
+    "авторизуй чат",
+    "удали групп",
+    "удали чат",
+    "отзови доступ",
+)
