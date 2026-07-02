@@ -31,7 +31,7 @@ _OPTION_ALIASES = {
     "reasoning": "efforts",
     "switch": "switch",
 }
-_POLICY_OPTION_KEYS = frozenset({"efforts", "models", "switch"})
+_POLICY_OPTION_KEYS = frozenset({"efforts", "efforts+", "models", "models+", "switch"})
 _USERNAME_PATTERN = r"@?[A-Za-z][A-Za-z0-9_]{4,31}"
 
 
@@ -71,8 +71,8 @@ def _help_text() -> str:
         "- `/access list`\n"
         "- `/access add <user_id|@username> [models=...] [efforts=...] [switch=on|off] "
         "[admin=on|off]`\n"
-        "- `/access policy <user_id|@username> [models=...] [efforts=...] [switch=on|off] "
-        "[admin=on|off]`\n"
+        "- `/access policy <user_id|@username> [models=...] [models+=...] "
+        "[efforts=...] [efforts+=...] [switch=on|off] [admin=on|off]`\n"
         "- `/access default [models=...] [efforts=...] [switch=on|off]`\n"
         "- `/access group list`\n"
         "- `/access group add <group_id>`\n"
@@ -85,6 +85,7 @@ def _help_text() -> str:
         "switch=off`\n"
         "- `/access add @somebody`\n"
         "- `/access policy 123456789 models=* efforts=* switch=on`\n"
+        "- `/access policy @somebody models+=gpt-5.3-spark`\n"
         "- `/access group add -1001234567890`"
     )
 
@@ -169,6 +170,7 @@ def _parse_options(
     args: list[str],
     *,
     allowed: frozenset[str],
+    appendable: frozenset[str] = frozenset(),
 ) -> tuple[list[str], dict[str, str], str | None]:
     positionals: list[str] = []
     options: dict[str, str] = {}
@@ -177,9 +179,17 @@ def _parse_options(
             positionals.append(arg)
             continue
         raw_key, value = arg.split("=", 1)
-        key = _OPTION_ALIASES.get(raw_key.strip().lower())
+        normalized = raw_key.strip().lower()
+        append = normalized.endswith("+")
+        if append:
+            normalized = normalized[:-1]
+        key = _OPTION_ALIASES.get(normalized)
         if key is None or key not in allowed:
             return [], {}, f"Unknown option `{raw_key}`."
+        if append:
+            if key not in appendable:
+                return [], {}, f"Unknown option `{raw_key}`."
+            key = f"{key}+"
         options[key] = value
     return positionals, options, None
 
@@ -190,8 +200,9 @@ async def _parse_policy_target(
     *,
     usage: str,
     allowed: frozenset[str],
+    appendable: frozenset[str] = frozenset(),
 ) -> tuple[int | None, dict[str, str], OrchestratorResult | None]:
-    positionals, options, error = _parse_options(args, allowed=allowed)
+    positionals, options, error = _parse_options(args, allowed=allowed, appendable=appendable)
     if error is not None:
         return None, {}, OrchestratorResult(text=error)
     if len(positionals) != 1:
@@ -203,19 +214,51 @@ async def _parse_policy_target(
     return user_id, options, None
 
 
+def _parse_policy_list_option(
+    options: dict[str, str],
+    *,
+    set_key: str,
+    append_key: str,
+    field: str,
+    append_field: str,
+) -> tuple[_PolicyPatch, str | None]:
+    patch: _PolicyPatch = {}
+    if set_key in options and append_key in options:
+        return {}, f"Use either `{set_key}=` or `{append_key}=`, not both."
+    if set_key in options:
+        values, error = _parse_list(options[set_key])
+        if error is not None:
+            return {}, error
+        patch[field] = values
+    if append_key in options:
+        values, error = _parse_list(options[append_key])
+        if error is not None:
+            return {}, error
+        patch[append_field] = values
+    return patch, None
+
+
 def _parse_policy_options(options: dict[str, str]) -> tuple[_PolicyPatch, str | None]:
     patch: _PolicyPatch = {}
-    if "models" in options:
-        models, error = _parse_list(options["models"])
+    for parsed, error in (
+        _parse_policy_list_option(
+            options,
+            set_key="models",
+            append_key="models+",
+            field="allowed_models",
+            append_field="append_allowed_models",
+        ),
+        _parse_policy_list_option(
+            options,
+            set_key="efforts",
+            append_key="efforts+",
+            field="allowed_reasoning_efforts",
+            append_field="append_allowed_reasoning_efforts",
+        ),
+    ):
         if error is not None:
             return {}, error
-        patch["allowed_models"] = models
-
-    if "efforts" in options:
-        efforts, error = _parse_list(options["efforts"])
-        if error is not None:
-            return {}, error
-        patch["allowed_reasoning_efforts"] = efforts
+        patch.update(parsed)
 
     if "switch" in options:
         switch, error = _parse_bool(options["switch"], allow_inherit=True)
@@ -226,13 +269,47 @@ def _parse_policy_options(options: dict[str, str]) -> tuple[_PolicyPatch, str | 
     return patch, None
 
 
-def _apply_policy_patch(rule: ModelPolicyRule, patch: _PolicyPatch) -> None:
+def _append_unique(
+    current: list[str] | None,
+    additions: list[str] | None,
+    inherited: list[str] | None,
+) -> list[str] | None:
+    if additions is None:
+        return current
+    base = current if current is not None else inherited
+    if base is None or "*" in base:
+        return ["*"]
+    merged = list(base)
+    for item in additions:
+        if item not in merged:
+            merged.append(item)
+    return merged
+
+
+def _apply_policy_patch(
+    rule: ModelPolicyRule,
+    patch: _PolicyPatch,
+    *,
+    inherited: ModelPolicyRule | None = None,
+) -> None:
     if "allowed_models" in patch:
         rule.allowed_models = cast("list[str] | None", patch["allowed_models"])
+    if "append_allowed_models" in patch:
+        rule.allowed_models = _append_unique(
+            rule.allowed_models,
+            cast("list[str] | None", patch["append_allowed_models"]),
+            inherited.allowed_models if inherited is not None else None,
+        )
     if "allowed_reasoning_efforts" in patch:
         rule.allowed_reasoning_efforts = cast(
             "list[str] | None",
             patch["allowed_reasoning_efforts"],
+        )
+    if "append_allowed_reasoning_efforts" in patch:
+        rule.allowed_reasoning_efforts = _append_unique(
+            rule.allowed_reasoning_efforts,
+            cast("list[str] | None", patch["append_allowed_reasoning_efforts"]),
+            inherited.allowed_reasoning_efforts if inherited is not None else None,
         )
     if "allow_model_switch" in patch:
         rule.allow_model_switch = cast("bool | None", patch["allow_model_switch"])
@@ -446,10 +523,11 @@ async def _set_user_policy(  # noqa: PLR0911
         orch,
         args,
         usage=(
-            "Usage: `/access policy <user_id|@username> [models=...] [efforts=...] "
-            "[switch=on|off] [admin=on|off]`"
+            "Usage: `/access policy <user_id|@username> [models=...] [models+=...] "
+            "[efforts=...] [efforts+=...] [switch=on|off] [admin=on|off]`"
         ),
         allowed=frozenset({"admin", "efforts", "models", "switch"}),
+        appendable=frozenset({"efforts", "models"}),
     )
     if parse_error is not None:
         return parse_error
@@ -479,7 +557,7 @@ async def _set_user_policy(  # noqa: PLR0911
         _set_policy_admin(orch, user_id, enabled=admin_state)
 
     rule = _user_rule(orch, user_id, admin=admin_state is True and not policy_options)
-    _apply_policy_patch(rule, policy_patch)
+    _apply_policy_patch(rule, policy_patch, inherited=policy.default)
 
     await _persist(orch)
     return OrchestratorResult(text=f"Policy updated.\n{_format_effective_user(orch, user_id)}")

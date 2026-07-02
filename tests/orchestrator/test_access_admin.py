@@ -6,7 +6,7 @@ import json
 from unittest.mock import AsyncMock
 
 from ductor_bot.cli.types import AgentResponse
-from ductor_bot.config import ModelPolicyConfig
+from ductor_bot.config import ModelPolicyConfig, ModelPolicyRule
 from ductor_bot.orchestrator.access_admin import cmd_access
 from ductor_bot.orchestrator.core import Orchestrator
 from ductor_bot.session.key import SessionKey
@@ -118,6 +118,69 @@ async def test_access_default_updates_default_policy(orch: Orchestrator) -> None
     assert policy["default"]["allowed_models"] == ["gpt-5.4-mini"]
     assert policy["default"]["allowed_reasoning_efforts"] == ["low"]
     assert policy["default"]["allow_model_switch"] is False
+
+
+async def test_access_policy_appends_models_and_efforts(orch: Orchestrator) -> None:
+    orch._config.allowed_user_ids = [1, 222]
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        users={
+            "222": ModelPolicyRule(
+                allowed_models=["gpt-5.3-spark"],
+                allowed_reasoning_efforts=["low"],
+                allow_model_switch=False,
+            )
+        },
+    )
+
+    result = await cmd_access(
+        orch,
+        SessionKey(chat_id=1, user_id=1),
+        "/access policy 222 models+=gpt-5.4-mini,gpt-5.3-spark efforts+=medium,low",
+    )
+
+    saved = _saved_config(orch)
+    policy = saved["model_policy"]
+    assert "Policy updated" in result.text
+    assert isinstance(policy, dict)
+    assert policy["users"]["222"]["allowed_models"] == [
+        "gpt-5.3-spark",
+        "gpt-5.4-mini",
+    ]
+    assert policy["users"]["222"]["allowed_reasoning_efforts"] == ["low", "medium"]
+
+
+async def test_access_policy_append_materializes_inherited_models(orch: Orchestrator) -> None:
+    orch._config.allowed_user_ids = [1, 222]
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        default=ModelPolicyRule(allowed_models=["gpt-5.3-spark"]),
+    )
+
+    result = await cmd_access(
+        orch,
+        SessionKey(chat_id=1, user_id=1),
+        "/access policy 222 models+=gpt-5.4-mini",
+    )
+
+    assert "Policy updated" in result.text
+    assert orch._config.model_policy.users["222"].allowed_models == [
+        "gpt-5.3-spark",
+        "gpt-5.4-mini",
+    ]
+
+
+async def test_access_add_rejects_append_options(orch: Orchestrator) -> None:
+    orch._config.allowed_user_ids = [1]
+
+    result = await cmd_access(
+        orch,
+        SessionKey(chat_id=1, user_id=1),
+        "/access add 222 models+=gpt-5.3-spark",
+    )
+
+    assert "Unknown option `models+`" in result.text
+    assert orch._config.allowed_user_ids == [1]
 
 
 async def test_access_admin_role_can_manage_users(orch: Orchestrator) -> None:
