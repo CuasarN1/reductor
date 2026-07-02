@@ -264,6 +264,33 @@ async def test_start_denies_when_model_switch_disabled(orch: Orchestrator) -> No
     assert resp.buttons is None
 
 
+async def test_start_denial_does_not_show_disallowed_current_model(
+    orch: Orchestrator,
+) -> None:
+    orch._config.model = "gpt-5.5"
+    orch._config.reasoning_effort = "xhigh"
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        default=ModelPolicyRule(
+            allowed_models=["sonnet"],
+            allowed_reasoning_efforts=["low", "medium"],
+            allow_model_switch=False,
+        ),
+    )
+    with patch(
+        "ductor_bot.orchestrator.selectors.model_selector.check_all_auth",
+        return_value={"claude": _AUTHED_CLAUDE},
+    ) as mock_auth:
+        resp = await model_selector_start(orch, SessionKey(chat_id=-100, user_id=99))
+
+    assert "Manual model selection is disabled" in resp.text
+    assert "gpt-5.5" not in resp.text
+    assert "xhigh" not in resp.text
+    assert "Current:" not in resp.text
+    assert resp.buttons is None
+    mock_auth.assert_not_called()
+
+
 # -- handle_model_callback: provider selection --
 
 

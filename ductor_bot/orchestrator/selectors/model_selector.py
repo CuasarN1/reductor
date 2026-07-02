@@ -257,6 +257,9 @@ async def model_selector_start(
     are authenticated.
     """
     user_id = subject_id_for_key(key)
+    if not can_switch_models(orch._config, user_id):
+        return SelectorResponse(text=f"{t('model.header')}\n\n{model_switch_denied_text()}")
+
     auth = await asyncio.to_thread(check_all_auth)
     codex_cache = (
         orch._observers.codex_cache_obs.get_cache() if orch._observers.codex_cache_obs else None
@@ -271,9 +274,6 @@ async def model_selector_start(
     ]
 
     header = await _status_line(orch, key)
-    if not can_switch_models(orch._config, user_id):
-        return SelectorResponse(text=f"{header}\n\n{model_switch_denied_text()}")
-
     if not authed:
         if authenticated:
             return SelectorResponse(text=f"{header}\n\n{no_models_available_text()}")
