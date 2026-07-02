@@ -103,6 +103,8 @@ logger = logging.getLogger(__name__)
 _WELCOME_IMAGE = Path(__file__).resolve().parent / "ductor_images" / "welcome.png"
 _CAPTION_LIMIT = 1024
 REDUCTOR_REPO_URL = "https://github.com/CuasarN1/reductor"
+_RESTART_IDLE_CHECK_SECONDS = 2.0
+_RESTART_BUSY_MAX_WAIT_SECONDS = 30 * 60
 
 # Backward-compatible patch points used by tests.
 TypingContext = _TypingContext
@@ -1737,23 +1739,30 @@ class TelegramBot:
                         )
                     except Exception:
                         logger.warning("Failed to send deploy restart notification", exc_info=True)
+                    await self._wait_for_restart_idle()
                     self._exit_code = EXIT_RESTART
                     await self._dp.stop_polling()
         except asyncio.CancelledError:
             logger.debug("Restart watcher cancelled")
 
+    async def _wait_for_restart_idle(self) -> None:
+        """Delay deploy restart until active Telegram turns and queued messages drain."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _RESTART_BUSY_MAX_WAIT_SECONDS
+        logged = False
+        while self._sequential.has_active_work():
+            if loop.time() >= deadline:
+                logger.warning("Restart proceeding despite active Telegram work after timeout")
+                return
+            if not logged:
+                logger.info("Restart delayed until active Telegram work drains")
+                logged = True
+            await asyncio.sleep(_RESTART_IDLE_CHECK_SECONDS)
+
     async def run(self) -> int:
         """Start polling. Returns exit code (0 = normal, 42 = restart)."""
         logger.info("Starting Telegram bot (aiogram, long-polling)...")
-        await self._bot.delete_webhook(drop_pending_updates=True)
-        # Flush any lingering polling session from a previous instance (e.g.
-        # after /agent_restart).  offset=-1 confirms all pending updates and
-        # immediately takes over the polling slot on Telegram's servers,
-        # preventing TelegramConflictError on the first real getUpdates call.
-        with contextlib.suppress(Exception):
-            from aiogram.methods import GetUpdates
-
-            await self._bot(GetUpdates(offset=-1, timeout=0))
+        await self._bot.delete_webhook(drop_pending_updates=False)
         allowed_updates = self._dp.resolve_used_update_types()
         logger.info("Polling allowed_updates=%s", ",".join(allowed_updates))
         await self._dp.start_polling(

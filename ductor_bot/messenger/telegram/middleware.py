@@ -322,6 +322,10 @@ class SequentialMiddleware(BaseMiddleware):
         """
         return self._lock_pool.any_locked_for_chat(chat_id) or self.has_pending(chat_id)
 
+    def has_active_work(self) -> bool:
+        """Return True if any message is active or waiting in the Telegram queue."""
+        return self._lock_pool.any_locked() or any(self._pending.values())
+
     async def cancel_entry(self, chat_id: int, entry_id: int) -> bool:
         """Cancel a single queued message and edit its indicator.
 

@@ -605,6 +605,23 @@ class TestQueueManagement:
         await task
         assert not mw.is_busy(1)
 
+    async def test_has_active_work_checks_locks_and_pending(self) -> None:
+        from ductor_bot.messenger.telegram.middleware import SequentialMiddleware, _QueueEntry
+
+        mw = SequentialMiddleware()
+        assert not mw.has_active_work()
+
+        lock = mw.get_lock(1)
+        await lock.acquire()
+        try:
+            assert mw.has_active_work()
+        finally:
+            lock.release()
+
+        assert not mw.has_active_work()
+        mw._pending[1] = [_QueueEntry(entry_id=1, chat_id=1, message_id=10, text_preview="x")]
+        assert mw.has_active_work()
+
     async def test_has_pending_empty(self) -> None:
         from ductor_bot.messenger.telegram.middleware import SequentialMiddleware
 

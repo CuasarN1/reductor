@@ -191,7 +191,7 @@ class TestTelegramBotRun:
         tg_bot._dp.resolve_used_update_types = MagicMock(return_value=["message", "callback_query"])
         tg_bot._dp.start_polling = AsyncMock()
         code = await tg_bot.run()
-        bot_instance.delete_webhook.assert_called_once_with(drop_pending_updates=True)
+        bot_instance.delete_webhook.assert_called_once_with(drop_pending_updates=False)
         tg_bot._dp.start_polling.assert_called_once_with(
             bot_instance,
             allowed_updates=["message", "callback_query"],
@@ -1199,6 +1199,36 @@ class TestWatchRestartMarker:
         data = json.loads(sentinel.read_text(encoding="utf-8"))
         assert data["broadcast"] is True
         assert "back online" in data["message"]
+
+    async def test_restart_marker_waits_for_active_work(self, tmp_path: Path) -> None:
+        from ductor_bot.infra.restart import EXIT_RESTART
+
+        tg_bot, _ = _make_tg_bot()
+        orch = _make_orchestrator()
+        orch.paths.ductor_home = tmp_path
+        tg_bot._orchestrator = orch
+        tg_bot._notification_service.notify_all = AsyncMock()
+        tg_bot._dp.stop_polling = AsyncMock(side_effect=asyncio.CancelledError)
+
+        lock = tg_bot.sequential.get_lock(1)
+        await lock.acquire()
+        marker = tmp_path / "restart-requested"
+        marker.write_text("1")
+
+        sleep_calls = 0
+
+        async def fake_sleep(_seconds: float) -> None:
+            nonlocal sleep_calls
+            sleep_calls += 1
+            if sleep_calls == 2:
+                lock.release()
+
+        with patch.object(asyncio, "sleep", new_callable=AsyncMock, side_effect=fake_sleep):
+            await tg_bot._watch_restart_marker()
+
+        assert sleep_calls >= 2
+        assert tg_bot._exit_code == EXIT_RESTART
+        tg_bot._dp.stop_polling.assert_called_once()
 
     async def test_handles_cancellation(self) -> None:
         tg_bot, _ = _make_tg_bot()
