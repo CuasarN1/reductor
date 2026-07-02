@@ -450,7 +450,7 @@ def _model_policy_denial(orch: Orchestrator, request: AgentRequest) -> Orchestra
         user_id,
         model_name,
         provider=provider_name,
-        reasoning_effort=orch._config.reasoning_effort,
+        reasoning_effort=request.reasoning_effort_override or orch._config.reasoning_effort,
     )
     return OrchestratorResult(text=denial) if denial else None
 

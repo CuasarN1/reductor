@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from ductor_bot.cli.types import AgentResponse
+from ductor_bot.config import ModelPolicyConfig, ModelPolicyRule
 from ductor_bot.orchestrator.core import Orchestrator
 from ductor_bot.orchestrator.flows import (
     StreamingCallbacks,
@@ -147,6 +148,33 @@ async def test_normal_model_override(orch: Orchestrator) -> None:
 
     request = mock_execute.call_args[0][0]
     assert request.model_override == "sonnet"
+
+
+async def test_normal_policy_denial_uses_selected_reasoning_effort(
+    orch: Orchestrator,
+) -> None:
+    orch._config.model = "gpt-5.5"
+    orch._config.reasoning_effort = "xhigh"
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        users={
+            "2": ModelPolicyRule(
+                allowed_models=["gpt-5.4-mini", "gpt-5.4"],
+                allowed_reasoning_efforts=["medium", "high"],
+                allow_model_switch=False,
+            )
+        },
+    )
+    mock_execute = AsyncMock(return_value=_mock_response(result="Allowed"))
+    object.__setattr__(orch._cli_service, "execute", mock_execute)
+
+    result = await normal(orch, SessionKey(chat_id=2, user_id=2), "привет")
+
+    request = mock_execute.call_args[0][0]
+    assert result.text == "Allowed"
+    assert request.model_override == "gpt-5.4-mini"
+    assert request.provider_override == "codex"
+    assert request.reasoning_effort_override == "medium"
 
 
 async def test_normal_sigkill_recovers_once_then_succeeds(orch: Orchestrator) -> None:
