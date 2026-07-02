@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
+
 from ductor_bot.infra.startup_state import StartupInfo, StartupKind
 from ductor_bot.text.response_format import (
     recovery_notification_text,
@@ -23,6 +26,29 @@ class TestStartupNotification:
     def test_restart_is_silent(self) -> None:
         text = startup_notification_text(StartupKind.SERVICE_RESTART.value)
         assert text == ""
+
+
+async def test_broadcast_restart_sentinel_notifies_startup_targets(tmp_path: Path) -> None:
+    from ductor_bot.infra.restart import write_restart_sentinel
+    from ductor_bot.messenger.telegram.startup import _handle_restart_sentinel
+
+    sentinel = tmp_path / "restart-sentinel.json"
+    write_restart_sentinel(
+        chat_id=0,
+        message="Bot is back.",
+        sentinel_path=sentinel,
+        broadcast=True,
+    )
+    bot = MagicMock()
+    bot._orch.paths.ductor_home = tmp_path
+    bot.notify_startup = AsyncMock()
+    bot.notification_service.notify = AsyncMock()
+
+    result = await _handle_restart_sentinel(bot)
+
+    assert result is not None
+    bot.notify_startup.assert_awaited_once_with("Bot is back.")
+    bot.notification_service.notify.assert_not_called()
 
 
 class TestRecoveryNotification:

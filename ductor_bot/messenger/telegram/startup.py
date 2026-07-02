@@ -25,7 +25,9 @@ async def _handle_restart_sentinel(bot: TelegramBot) -> dict[str, object] | None
     if sentinel:
         chat_id = int(sentinel.get("chat_id", 0))
         msg = str(sentinel.get("message", t("startup.restart_default")))
-        if chat_id:
+        if bool(sentinel.get("broadcast")) or not chat_id:
+            await bot.notify_startup(msg)
+        else:
             await bot.notification_service.notify(chat_id, msg)
     return sentinel
 

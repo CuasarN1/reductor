@@ -21,11 +21,13 @@ def write_restart_sentinel(
     message: str = "Restart completed.",
     *,
     sentinel_path: Path,
+    broadcast: bool = False,
 ) -> None:
     """Write a sentinel file so the bot can notify the user after restart."""
     data = {
         "chat_id": chat_id,
         "message": message,
+        "broadcast": broadcast,
         "timestamp": datetime.now(UTC).isoformat(),
     }
     atomic_bytes_save(sentinel_path, json.dumps(data).encode())

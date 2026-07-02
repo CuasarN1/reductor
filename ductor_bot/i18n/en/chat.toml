@@ -80,6 +80,8 @@ reboot_body = "System reboot detected — back online."
 restart_default = "Restart completed."
 restart_header = "**Restarting**"
 restart_body = "Bot is shutting down and will be back shortly."
+deploy_restarting = "**Deploying update**\nBot will be unavailable for a short time."
+deploy_available = "**Bot is back online**\nUpdate deployed. You can use the bot again."
 
 upgrade_complete = "**Upgrade complete** `{old}` -> `{new}`"
 

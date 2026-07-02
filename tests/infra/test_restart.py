@@ -18,7 +18,23 @@ class TestRestartSentinel:
         data = json.loads(sentinel.read_text(encoding="utf-8"))
         assert data["chat_id"] == 42
         assert data["message"] == "Done."
+        assert data["broadcast"] is False
         assert "timestamp" in data
+
+    def test_write_can_create_broadcast_sentinel(self, tmp_path: Path) -> None:
+        from ductor_bot.infra.restart import write_restart_sentinel
+
+        sentinel = tmp_path / "restart-sentinel.json"
+        write_restart_sentinel(
+            chat_id=0,
+            message="Bot is back.",
+            sentinel_path=sentinel,
+            broadcast=True,
+        )
+        data = json.loads(sentinel.read_text(encoding="utf-8"))
+        assert data["chat_id"] == 0
+        assert data["message"] == "Bot is back."
+        assert data["broadcast"] is True
 
     def test_consume_returns_data_and_deletes(self, tmp_path: Path) -> None:
         from ductor_bot.infra.restart import (

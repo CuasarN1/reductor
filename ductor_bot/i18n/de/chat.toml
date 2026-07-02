@@ -79,6 +79,8 @@ reboot_body = "System-Reboot erkannt — wir sind zurück! Haben uns kurz hingel
 restart_default = "Neustart abgeschlossen. Wir sind wieder da!"
 restart_header = "**Neustart**"
 restart_body = "Bot fährt runter und ist gleich wieder da. Kurze Kaffeepause! ☕"
+deploy_restarting = "**Update wird ausgerollt**\nDer Bot ist kurzzeitig nicht verfügbar."
+deploy_available = "**Bot ist wieder online**\nUpdate ausgerollt. Du kannst den Bot wieder nutzen."
 
 upgrade_complete = "**Upgrade abgeschlossen** `{old}` -> `{new}`"
 

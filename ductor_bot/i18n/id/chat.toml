@@ -78,6 +78,8 @@ reboot_body = "Reboot sistem terdeteksi — kembali online."
 restart_default = "Restart selesai."
 restart_header = "**Memulai Ulang**"
 restart_body = "Bot sedang dimatikan dan akan segera kembali."
+deploy_restarting = "**Menerapkan pembaruan**\nBot akan tidak tersedia untuk sementara."
+deploy_available = "**Bot kembali online**\nPembaruan selesai. Bot bisa digunakan lagi."
 
 upgrade_complete = "**Pembaruan selesai** `{old}` -> `{new}`"
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
@@ -1178,6 +1179,7 @@ class TestWatchRestartMarker:
         orch = _make_orchestrator()
         orch.paths.ductor_home = tmp_path
         tg_bot._orchestrator = orch
+        tg_bot.notify_startup = AsyncMock()
         # stop_polling raises CancelledError to break the while-True loop,
         # matching production behavior where shutdown cancels the task.
         tg_bot._dp.stop_polling = AsyncMock(side_effect=asyncio.CancelledError)
@@ -1185,16 +1187,18 @@ class TestWatchRestartMarker:
         marker = tmp_path / "restart-requested"
         marker.write_text("1")
 
-        # Patch both sleep (to skip 2s poll) and to_thread (to run synchronously)
-        with (
-            patch.object(asyncio, "sleep", new_callable=AsyncMock),
-            patch.object(asyncio, "to_thread", new_callable=AsyncMock) as mock_to_thread,
-        ):
-            mock_to_thread.return_value = True  # consume_restart_marker returns True
+        # Patch sleep to skip the 2s poll interval.
+        with patch.object(asyncio, "sleep", new_callable=AsyncMock):
             await tg_bot._watch_restart_marker()
 
         assert tg_bot._exit_code == EXIT_RESTART
         tg_bot._dp.stop_polling.assert_called_once()
+        tg_bot.notify_startup.assert_awaited_once()
+        assert "unavailable" in tg_bot.notify_startup.call_args.args[0]
+        sentinel = tmp_path / "restart-sentinel.json"
+        data = json.loads(sentinel.read_text(encoding="utf-8"))
+        assert data["broadcast"] is True
+        assert "back online" in data["message"]
 
     async def test_handles_cancellation(self) -> None:
         tg_bot, _ = _make_tg_bot()

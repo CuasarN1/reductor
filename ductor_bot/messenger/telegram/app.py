@@ -1712,13 +1712,27 @@ class TelegramBot:
 
     async def _watch_restart_marker(self) -> None:
         """Poll for restart-requested marker file."""
+        from ductor_bot.infra.restart import write_restart_sentinel
+
         paths = self._orch.paths
         marker = paths.ductor_home / "restart-requested"
+        sentinel = paths.ductor_home / "restart-sentinel.json"
         try:
             while True:
                 await asyncio.sleep(2.0)
                 if await asyncio.to_thread(consume_restart_marker, marker_path=marker):
                     logger.info("Restart marker detected, stopping polling")
+                    try:
+                        await asyncio.to_thread(
+                            write_restart_sentinel,
+                            0,
+                            t("startup.deploy_available"),
+                            sentinel_path=sentinel,
+                            broadcast=True,
+                        )
+                        await self.notify_startup(t("startup.deploy_restarting"))
+                    except Exception:
+                        logger.warning("Failed to send deploy restart notification", exc_info=True)
                     self._exit_code = EXIT_RESTART
                     await self._dp.stop_polling()
         except asyncio.CancelledError:

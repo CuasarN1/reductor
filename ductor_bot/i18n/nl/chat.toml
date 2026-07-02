@@ -79,6 +79,8 @@ reboot_body = "Systeemherstart gedetecteerd — we zijn er weer."
 restart_default = "Herstart voltooid."
 restart_header = "**Herstarten**"
 restart_body = "Bot gaat even uit en is zo weer terug."
+deploy_restarting = "**Update wordt uitgerold**\nDe bot is korte tijd niet beschikbaar."
+deploy_available = "**Bot is weer online**\nUpdate uitgerold. Je kunt de bot weer gebruiken."
 
 upgrade_complete = "**Upgrade voltooid** `{old}` -> `{new}`"
 

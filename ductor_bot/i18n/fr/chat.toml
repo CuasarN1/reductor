@@ -79,6 +79,8 @@ reboot_body = "Redémarrage système détecté — de retour en ligne."
 restart_default = "Redémarrage terminé."
 restart_header = "**Redémarrage**"
 restart_body = "Le bot s'arrête et revient dans un instant."
+deploy_restarting = "**Déploiement de la mise à jour**\nLe bot sera indisponible pendant un court moment."
+deploy_available = "**Le bot est de nouveau disponible**\nMise à jour déployée. Tu peux réutiliser le bot."
 
 upgrade_complete = "**Mise à jour terminée** `{old}` -> `{new}`"
 
