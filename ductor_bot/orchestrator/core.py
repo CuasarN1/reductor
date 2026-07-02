@@ -28,13 +28,19 @@ from ductor_bot.infra.docker import DockerManager
 from ductor_bot.infra.inflight import InflightTracker
 from ductor_bot.model_policy import (
     can_switch_models,
+    is_model_policy_admin,
     model_denied_text,
     model_switch_denied_text,
     request_policy_denial,
     select_model_target_for_prompt,
     subject_id_for_key,
 )
-from ductor_bot.orchestrator.access_admin import cmd_access
+from ductor_bot.orchestrator.access_admin import (
+    access_change_command_guidance_text,
+    access_change_denied_text,
+    cmd_access,
+    is_access_config_change_request,
+)
 from ductor_bot.orchestrator.commands import (
     cmd_cron,
     cmd_diagnose,
@@ -369,6 +375,12 @@ class Orchestrator:
         if result is not None:
             return result
 
+        user_id = subject_id_for_key(dispatch.key)
+        if is_access_config_change_request(dispatch.text):
+            if is_model_policy_admin(self._config, user_id):
+                return OrchestratorResult(text=access_change_command_guidance_text())
+            return OrchestratorResult(text=access_change_denied_text())
+
         await self._ensure_docker()
 
         # _known_model_ids only covers Claude + Gemini IDs (refreshed on Gemini
@@ -398,7 +410,6 @@ class Orchestrator:
                 return await named_session_flow(self, dispatch.key, first_key, session_prompt)
 
         if directives.is_directive_only and directives.has_model:
-            user_id = subject_id_for_key(dispatch.key)
             model = directives.model or ""
             provider = self.models.provider_for(model)
             if not can_switch_models(self._config, user_id):

@@ -329,7 +329,7 @@ All three are **hot-reloadable** — edit `config.json` and changes take effect 
 
 > **Privacy Mode:** Telegram bots have Privacy Mode enabled by default and only see `/commands` in groups. To let the bot see all messages, make it a **group admin** or disable Privacy Mode via BotFather (`/setprivacy` → Disable). If changed after joining, remove and re-add the bot.
 
-**Group management:** When the bot is added to a group not in `allowed_group_ids`, it warns and auto-leaves. Use `/where` to see tracked groups and their IDs.
+**Group management:** When the bot is added to a group not in `allowed_group_ids`, it warns and auto-leaves. Use `/where` to see tracked groups and their IDs. An owner/admin can approve a group with `/access group add <group_id>`.
 
 **Channel allowlist:** Telegram channels are tracked separately via `allowed_channel_ids`. Unauthorized channels are announced and auto-left on join/audit just like unauthorized groups.
 
@@ -338,8 +338,8 @@ All three are **hot-reloadable** — edit `config.json` and changes take effect 
 > 2. Add the bot and make it **admin** (required for full message access)
 > 3. Send a message mentioning `@your_bot` — the bot won't respond yet
 > 4. In your private chat with the bot, run `/where` — you'll see the group listed under "Rejected" with its ID
-> 5. Tell the bot: *"Add this as an allowed group in the config"* — it updates `config.json` for you
-> 6. Run `/restart` — the bot now responds in the group
+> 5. As an owner/admin, run `/access group add <group_id>` — the allowlist hot-reloads
+> 6. Add the bot again if it already auto-left — the bot now responds in the group
 
 ### Matrix
 

@@ -72,13 +72,17 @@ def _help_text() -> str:
         "- `/access policy <user_id> [models=...] [efforts=...] [switch=on|off] "
         "[admin=on|off]`\n"
         "- `/access default [models=...] [efforts=...] [switch=on|off]`\n"
+        "- `/access group list`\n"
+        "- `/access group add <group_id>`\n"
+        "- `/access group remove <group_id>`\n"
         "- `/access admin <user_id> on|off`\n"
         "- `/access remove <user_id>`\n"
         "\n"
         "Examples:\n"
         "- `/access add 123456789 models=gpt-5.4-mini,gpt-5.4 efforts=low,medium "
         "switch=off`\n"
-        "- `/access policy 123456789 models=* efforts=* switch=on`"
+        "- `/access policy 123456789 models=* efforts=* switch=on`\n"
+        "- `/access group add -1001234567890`"
     )
 
 
@@ -90,6 +94,16 @@ def _parse_user_id(raw: str) -> tuple[int | None, str | None]:
     if user_id <= 0:
         return None, f"Telegram user ID must be positive: `{raw}`."
     return user_id, None
+
+
+def _parse_group_id(raw: str) -> tuple[int | None, str | None]:
+    try:
+        group_id = int(raw)
+    except ValueError:
+        return None, f"Invalid Telegram group ID `{raw}`."
+    if group_id >= 0:
+        return None, f"Telegram group ID must be negative: `{raw}`."
+    return group_id, None
 
 
 def _parse_bool(raw: str, *, allow_inherit: bool = False) -> tuple[bool | None, str | None]:
@@ -203,6 +217,19 @@ def _add_allowed_user(orch: Orchestrator, user_id: int) -> bool:
     return True
 
 
+def _add_allowed_group(orch: Orchestrator, group_id: int) -> bool:
+    if group_id in orch._config.allowed_group_ids:
+        return False
+    orch._config.allowed_group_ids.append(group_id)
+    return True
+
+
+def _remove_allowed_group(orch: Orchestrator, group_id: int) -> bool:
+    before = list(orch._config.allowed_group_ids)
+    orch._config.allowed_group_ids = [gid for gid in before if gid != group_id]
+    return group_id in before
+
+
 def _set_policy_admin(orch: Orchestrator, user_id: int, *, enabled: bool) -> bool:
     admins = list(dict.fromkeys(orch._config.model_policy.admin_user_ids))
     changed = False
@@ -232,22 +259,24 @@ def _user_rule(orch: Orchestrator, user_id: int, *, admin: bool = False) -> Mode
     return users[key]
 
 
-async def _persist(orch: Orchestrator) -> None:
-    await update_config_file_async(
-        orch.paths.config_path,
-        allowed_user_ids=list(orch._config.allowed_user_ids),
-        model_policy=orch._config.model_policy.model_dump(mode="json"),
-    )
+async def _persist(orch: Orchestrator, *, include_groups: bool = False) -> None:
+    updates: dict[str, object] = {
+        "allowed_user_ids": list(orch._config.allowed_user_ids),
+        "model_policy": orch._config.model_policy.model_dump(mode="json"),
+    }
+    hot: dict[str, object] = {
+        "allowed_user_ids": orch._config.allowed_user_ids,
+        "model_policy": orch._config.model_policy,
+    }
+    if include_groups:
+        updates["allowed_group_ids"] = list(orch._config.allowed_group_ids)
+        hot["allowed_group_ids"] = orch._config.allowed_group_ids
+
+    await update_config_file_async(orch.paths.config_path, **updates)
     orch._cli_service.update_model_policy(orch._config.model_policy)
     handler = getattr(orch, "_config_hot_reload_handler", None)
     if handler is not None:
-        handler(
-            orch._config,
-            {
-                "allowed_user_ids": orch._config.allowed_user_ids,
-                "model_policy": orch._config.model_policy,
-            },
-        )
+        handler(orch._config, hot)
 
 
 def _format_list(values: list[str] | None) -> str:
@@ -300,6 +329,11 @@ def _list_access(orch: Orchestrator) -> str:
         lines.append("- none")
     else:
         lines.extend(_format_effective_user(orch, user_id) for user_id in orch._config.allowed_user_ids)
+    lines.extend(["", "Groups:"])
+    if not orch._config.allowed_group_ids:
+        lines.append("- none")
+    else:
+        lines.extend(f"- `{group_id}`" for group_id in orch._config.allowed_group_ids)
     return "\n".join(lines)
 
 
@@ -422,6 +456,60 @@ async def _set_default_policy(orch: Orchestrator, args: list[str]) -> Orchestrat
     return OrchestratorResult(text=f"Default policy updated: {_format_rule(policy.default)}")
 
 
+def _list_groups(orch: Orchestrator, positionals: list[str]) -> OrchestratorResult:
+    if len(positionals) != 1:
+        return OrchestratorResult(text="Usage: `/access group list`")
+    if not orch._config.allowed_group_ids:
+        return OrchestratorResult(text="Allowed groups:\n- none")
+    lines = ["Allowed groups:"]
+    lines.extend(f"- `{group_id}`" for group_id in orch._config.allowed_group_ids)
+    return OrchestratorResult(text="\n".join(lines))
+
+
+async def _add_group(orch: Orchestrator, positionals: list[str]) -> OrchestratorResult:
+    if len(positionals) != 2:
+        return OrchestratorResult(text="Usage: `/access group add <group_id>`")
+    group_id, error = _parse_group_id(positionals[1])
+    if error is not None or group_id is None:
+        return OrchestratorResult(text=error or "Invalid Telegram group ID.")
+    added = _add_allowed_group(orch, group_id)
+    await _persist(orch, include_groups=True)
+    status = "added" if added else "already allowlisted"
+    return OrchestratorResult(text=f"Group access updated: `{group_id}` {status}.")
+
+
+async def _remove_group(orch: Orchestrator, positionals: list[str]) -> OrchestratorResult:
+    if len(positionals) != 2:
+        return OrchestratorResult(text="Usage: `/access group remove <group_id>`")
+    group_id, error = _parse_group_id(positionals[1])
+    if error is not None or group_id is None:
+        return OrchestratorResult(text=error or "Invalid Telegram group ID.")
+    removed = _remove_allowed_group(orch, group_id)
+    await _persist(orch, include_groups=True)
+    status = "removed" if removed else "was not allowlisted"
+    return OrchestratorResult(text=f"Group access updated: `{group_id}` {status}.")
+
+
+async def _manage_group(orch: Orchestrator, args: list[str]) -> OrchestratorResult:
+    positionals, options, error = _parse_options(args, allowed=frozenset())
+    if error is not None:
+        return OrchestratorResult(text=error)
+    if options or not positionals:
+        return OrchestratorResult(text="Usage: `/access group list|add|remove <group_id>`")
+
+    action = positionals[0].lower()
+    if action in {"list", "ls"}:
+        return _list_groups(orch, positionals)
+
+    if action in {"add", "approve"}:
+        return await _add_group(orch, positionals)
+
+    if action in {"remove", "rm", "revoke"}:
+        return await _remove_group(orch, positionals)
+
+    return OrchestratorResult(text=f"Unknown /access group action `{action}`.")
+
+
 async def _set_admin(orch: Orchestrator, args: list[str]) -> OrchestratorResult:
     positionals, options, error = _parse_options(args, allowed=frozenset())
     if error is not None:
@@ -479,7 +567,149 @@ _ACTION_HANDLERS: dict[str, _AccessHandler] = {
     "add": _add_user,
     "admin": _set_admin,
     "default": _set_default_policy,
+    "group": _manage_group,
     "list": _list_access_result,
     "policy": _set_user_policy,
     "remove": _remove_user,
 }
+
+
+def access_change_denied_text() -> str:
+    """User-facing denial for access allowlist changes from non-admin users."""
+    return (
+        "Access allowlist changes are admin-only. Ask an owner/admin to use "
+        "`/access add <user_id>` or `/access group add <group_id>`."
+    )
+
+
+def access_change_command_guidance_text() -> str:
+    """User-facing guidance for admins who ask for access edits in prose."""
+    return (
+        "Use the admin-only access commands for allowlist changes: "
+        "`/access add <user_id>` or `/access group add <group_id>`."
+    )
+
+
+def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
+    return any(term in text for term in terms)
+
+
+def is_access_config_change_request(text: str) -> bool:
+    """Return True when text appears to request access allowlist changes."""
+    normalized = text.casefold()
+    if _contains_any(normalized, ("allowed_user_ids", "allowed_group_ids")) and _contains_any(
+        normalized,
+        _CONFIG_KEY_CHANGE_TERMS,
+    ):
+        return True
+    return _is_user_access_change_request(normalized) or _is_group_access_change_request(normalized)
+
+
+def _is_user_access_change_request(normalized: str) -> bool:
+    has_user = _contains_any(
+        normalized,
+        (
+            "user",
+            "users",
+            "telegram id",
+            "telegram user",
+            "пользовател",
+            "юзер",
+            "человек",
+        ),
+    )
+    if not has_user:
+        return False
+
+    access_terms = (
+        "allowlist",
+        "whitelist",
+        "access",
+        "authorize",
+        "authorise",
+        "grant",
+        "admin",
+        "доступ",
+        "разреш",
+        "авториз",
+        "админ",
+    )
+    return _contains_any(normalized, access_terms) and _contains_any(
+        normalized,
+        _ACCESS_CHANGE_TERMS,
+    )
+
+
+def is_group_access_change_request(text: str) -> bool:
+    """Best-effort detector for ordinary-language group allowlist change requests.
+
+    Slash commands are handled by ``cmd_access``. This guard catches non-command
+    requests before they reach a CLI agent with filesystem access.
+    """
+    normalized = text.casefold()
+    return _is_group_access_change_request(normalized)
+
+
+def _is_group_access_change_request(normalized: str) -> bool:
+    if "allowed_group_ids" in normalized:
+        return _contains_any(normalized, _CONFIG_KEY_CHANGE_TERMS)
+
+    has_group = _contains_any(normalized, ("group", "chat", "групп", "чат"))
+    if not has_group:
+        return False
+
+    if "-100" in normalized:
+        return True
+
+    access_terms = (
+        "allowlist",
+        "whitelist",
+        "access",
+        "authorize",
+        "authorise",
+        "approve",
+        "grant",
+        "доступ",
+        "разреш",
+        "одобр",
+        "авториз",
+    )
+    if _contains_any(normalized, access_terms) and _contains_any(
+        normalized,
+        _ACCESS_CHANGE_TERMS,
+    ):
+        return True
+
+    bot_terms = ("bot", "бот")
+    return _contains_any(normalized, bot_terms) and _contains_any(
+        normalized,
+        _ACCESS_CHANGE_TERMS,
+    )
+
+
+_ACCESS_CHANGE_TERMS = (
+    "add",
+    "allow",
+    "approve",
+    "authorize",
+    "authorise",
+    "change",
+    "edit",
+    "grant",
+    "modify",
+    "remove",
+    "revoke",
+    "set",
+    "update",
+    "добав",
+    "выдай",
+    "измен",
+    "одобр",
+    "помен",
+    "разреш",
+    "авториз",
+    "удал",
+    "отзов",
+)
+
+_CONFIG_KEY_CHANGE_TERMS = tuple(term for term in _ACCESS_CHANGE_TERMS if term != "allow")

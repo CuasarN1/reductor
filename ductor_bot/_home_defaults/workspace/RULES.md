@@ -81,6 +81,9 @@ Always tell the user you triggered a restart.
 - Ask for confirmation before destructive actions.
 - Ask before actions that publish or send data to external systems.
 - Prefer reversible operations.
+- Treat Telegram access allowlists as admin-only. Do not edit `allowed_user_ids`
+  or `allowed_group_ids` from natural-language requests; tell the user to use
+  `/access add <user_id>` or `/access group add <group_id>`.
 
 ## Work Delegation — Background Tasks
 

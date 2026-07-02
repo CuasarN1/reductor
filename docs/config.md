@@ -620,6 +620,9 @@ Bot access commands:
 - `/access add <telegram_user_id> models=gpt-5.4-mini,gpt-5.4 efforts=low,medium switch=off`
 - `/access policy <telegram_user_id> models=* efforts=* switch=on`
 - `/access default models=gpt-5.4-mini efforts=low,medium switch=off`
+- `/access group list`
+- `/access group add <telegram_group_id>`
+- `/access group remove <telegram_group_id>`
 - `/access admin <telegram_user_id> on|off`
 - `/access remove <telegram_user_id>`
 

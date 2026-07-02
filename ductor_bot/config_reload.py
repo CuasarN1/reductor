@@ -1,6 +1,6 @@
 """Centralized config hot-reload: watch config.json and apply safe changes at runtime.
 
-Mtime-based watcher (5-second poll) that detects config file changes, validates
+Content-based watcher (5-second poll) that detects config file changes, validates
 the new config via Pydantic, diffs against the current config, and applies
 hot-reloadable fields without restart. Fields requiring restart are logged as
 warnings.
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 from collections.abc import Callable
@@ -133,16 +134,22 @@ class ConfigReloader:
         self._config = current_config
         self._on_hot_reload = on_hot_reload
         self._on_restart_needed = on_restart_needed
-        self._last_mtime: float = 0.0
+        self._last_digest: str = ""
         self._task: asyncio.Task[None] | None = None
-        self._init_mtime()
+        self._init_digest()
 
-    def _init_mtime(self) -> None:
-        """Read the initial mtime so we don't trigger on first poll."""
+    def _init_digest(self) -> None:
+        """Read the initial file digest so we don't trigger on first poll."""
+        digest = self._file_digest()
+        self._last_digest = digest or ""
+
+    def _file_digest(self) -> str | None:
+        """Return a stable digest for config contents, or None if unreadable."""
         try:
-            self._last_mtime = self._path.stat().st_mtime
+            data = self._path.read_bytes()
         except OSError:
-            self._last_mtime = 0.0
+            return None
+        return hashlib.sha256(data).hexdigest()
 
     async def start(self) -> None:
         """Start the background polling task."""
@@ -168,16 +175,15 @@ class ConfigReloader:
             await self._check()
 
     async def _check(self) -> None:
-        """Check mtime, load, diff, and apply if changed."""
-        try:
-            stat = self._path.stat()
-        except OSError:
+        """Check content digest, load, diff, and apply if changed."""
+        digest = await asyncio.to_thread(self._file_digest)
+        if digest is None:
             return
 
-        if stat.st_mtime <= self._last_mtime:
+        if digest == self._last_digest:
             return
 
-        self._last_mtime = stat.st_mtime
+        self._last_digest = digest
         logger.info("Config file changed, reloading...")
 
         new_config = await self._load_config()
