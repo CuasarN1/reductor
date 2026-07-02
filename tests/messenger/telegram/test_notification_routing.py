@@ -53,6 +53,29 @@ def _make_bot(
     return bot, fake_send_rich, notify_all_mock, broadcast_mock
 
 
+async def test_notification_service_notify_all_includes_allowed_groups(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ductor_bot.messenger.telegram import app as app_module
+
+    fake_send_rich = AsyncMock()
+    monkeypatch.setattr(app_module, "send_rich", fake_send_rich)
+    cfg = AgentConfig(
+        telegram_token="test-token",
+        allowed_user_ids=[111, 222],
+        allowed_group_ids=[-100999],
+    )
+    svc = app_module.TelegramNotificationService(MagicMock(), cfg)
+
+    await svc.notify_all("deploy note")
+
+    assert [call.args[1] for call in fake_send_rich.await_args_list] == [
+        111,
+        222,
+        -100999,
+    ]
+
+
 async def test_notify_startup_falls_back_when_no_targets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

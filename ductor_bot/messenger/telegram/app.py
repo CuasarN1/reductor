@@ -172,6 +172,8 @@ class TelegramNotificationService:
     async def notify_all(self, text: str) -> None:
         for uid in self._config.allowed_user_ids:
             await send_rich(self._bot, uid, text, None)
+        for gid in self._config.allowed_group_ids:
+            await send_rich(self._bot, gid, text, None)
 
 
 class TelegramBot:
