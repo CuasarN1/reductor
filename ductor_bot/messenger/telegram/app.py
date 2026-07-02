@@ -1736,9 +1736,7 @@ class TelegramBot:
                             sentinel_path=sentinel,
                             broadcast=True,
                         )
-                        await self._notification_service.notify_all(
-                            t("startup.deploy_restarting")
-                        )
+                        await self.notify_startup(t("startup.deploy_restarting"))
                     except Exception:
                         logger.warning("Failed to send deploy restart notification", exc_info=True)
                     await self._wait_for_restart_idle()

@@ -28,7 +28,7 @@ class TestStartupNotification:
         assert text == ""
 
 
-async def test_broadcast_restart_sentinel_notifies_all_users(tmp_path: Path) -> None:
+async def test_broadcast_restart_sentinel_uses_startup_routing(tmp_path: Path) -> None:
     from ductor_bot.infra.restart import write_restart_sentinel
     from ductor_bot.messenger.telegram.startup import _handle_restart_sentinel
 
@@ -41,13 +41,15 @@ async def test_broadcast_restart_sentinel_notifies_all_users(tmp_path: Path) -> 
     )
     bot = MagicMock()
     bot._orch.paths.ductor_home = tmp_path
+    bot.notify_startup = AsyncMock()
     bot.notification_service.notify_all = AsyncMock()
     bot.notification_service.notify = AsyncMock()
 
     result = await _handle_restart_sentinel(bot)
 
     assert result is not None
-    bot.notification_service.notify_all.assert_awaited_once_with("Bot is back.")
+    bot.notify_startup.assert_awaited_once_with("Bot is back.")
+    bot.notification_service.notify_all.assert_not_called()
     bot.notification_service.notify.assert_not_called()
 
 
