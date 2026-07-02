@@ -272,7 +272,7 @@ unknown_action = "Unknown action. Refreshed cron list."
 # -- Welcome (Telegram) -------------------------------------------------------
 
 [welcome]
-header = "**Welcome to ductor.dev{name}!**"
+header = "**Welcome to ReDuctor{name}!**"
 tagline = """\
 Deploy from your pocket. Automate from your couch.
 Claude Code, Codex & Gemini -- straight from Telegram."""
@@ -288,7 +288,7 @@ btn_system = "Check out the system!"
 btn_who = "Who are you? Who am I?"
 
 prompt_know = """\
-Hey, I just set up ductor.dev and I want you to get to know me. \
+Hey, I just set up ReDuctor and I want you to get to know me. \
 Ask me everything you need to know so we can work well together -- \
 my name, what I do, what I'm working on, how I like to communicate. \
 Save what you learn to your memory."""
@@ -303,7 +303,7 @@ Then ask me who I am and what I need help with."""
 # -- Info ----------------------------------------------------------------------
 
 [info]
-header = "**ductor.dev**"
+header = "**ReDuctor**"
 version = "Version: `{version}`"
 telegram_description = "AI coding agents (Claude, Codex, Gemini) on Telegram.\nNamed sessions, persistent memory, cron jobs, webhooks, live streaming."
 matrix_description = "AI coding agents (Claude, Codex, Gemini) on Matrix.\nNamed sessions, persistent memory, cron jobs, webhooks, live streaming."

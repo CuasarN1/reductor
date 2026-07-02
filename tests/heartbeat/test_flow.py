@@ -34,6 +34,7 @@ def _past_cooldown() -> time_machine.travel:
 
 @pytest.fixture
 def orch(orch: Orchestrator) -> Orchestrator:
+    orch._config.allowed_user_ids = [1]
     return orch
 
 
@@ -82,6 +83,30 @@ async def test_heartbeat_skips_new_session(orch: Orchestrator) -> None:
     """Heartbeat does nothing if there is no established session."""
     result = await heartbeat_flow(orch, SessionKey(chat_id=999))
     assert result is None
+
+
+async def test_heartbeat_uses_scoped_memory_for_non_admin(
+    orch: Orchestrator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Heartbeat default prompt is rewritten to the non-admin scoped memory path."""
+    from ductor_bot.orchestrator.flows import normal
+
+    orch._config.allowed_user_ids = [1, 2]
+    key = SessionKey(chat_id=2, user_id=2)
+    monkeypatch.setattr(
+        orch._cli_service, "execute", AsyncMock(return_value=_mock_response(result="Hello"))
+    )
+    await normal(orch, key, "init")
+
+    hb_mock = AsyncMock(return_value=_mock_response(result="HEARTBEAT_OK"))
+    with _past_cooldown():
+        monkeypatch.setattr(orch._cli_service, "execute", hb_mock)
+        result = await heartbeat_flow(orch, key)
+
+    assert result is None
+    hb_mock.assert_awaited_once()
+    request = hb_mock.call_args[0][0]
+    assert "memory_system/users/2/MAINMEMORY.md" in request.prompt
 
 
 async def test_heartbeat_ok_does_not_increment_message_count(

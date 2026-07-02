@@ -60,6 +60,7 @@ async def test_normal_returns_result(orch: Orchestrator) -> None:
 
 
 async def test_normal_new_session_injects_mainmemory(orch: Orchestrator) -> None:
+    orch._config.allowed_user_ids = [1]
     orch.paths.mainmemory_path.write_text("# Important Context")
     mock_execute = AsyncMock(return_value=_mock_response())
     object.__setattr__(orch._cli_service, "execute", mock_execute)
@@ -73,7 +74,25 @@ async def test_normal_new_session_injects_mainmemory(orch: Orchestrator) -> None
     assert request.resume_session is None  # New session
 
 
+async def test_normal_new_session_skips_mainmemory_for_non_admin(orch: Orchestrator) -> None:
+    orch._config.allowed_user_ids = [1, 2]
+    orch.paths.mainmemory_path.write_text("# Important Context")
+    mock_execute = AsyncMock(return_value=_mock_response())
+    object.__setattr__(orch._cli_service, "execute", mock_execute)
+
+    await normal(orch, SessionKey(chat_id=2, user_id=2), "Hello")
+
+    request = mock_execute.call_args[0][0]
+    assert request.append_system_prompt is not None
+    if request.append_system_prompt is not None:
+        assert "Important Context" not in request.append_system_prompt
+        assert "memory_system/users/2/MAINMEMORY.md" in request.append_system_prompt
+    assert "BACKGROUND TASKS" in request.prompt
+    assert request.resume_session is None
+
+
 async def test_normal_resume_session_no_append(orch: Orchestrator) -> None:
+    orch._config.allowed_user_ids = [1]
     mock_execute = AsyncMock(return_value=_mock_response())
     object.__setattr__(orch._cli_service, "execute", mock_execute)
 
@@ -390,10 +409,17 @@ async def test_streaming_fallback_flag(orch: Orchestrator) -> None:
 async def test_streaming_schedules_memory_flush_without_blocking_reply(
     orch: Orchestrator,
 ) -> None:
+    orch._config.allowed_user_ids = [1]
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def _maybe_flush(_key: SessionKey, _session: SessionData) -> None:
+    async def _maybe_flush(
+        _key: SessionKey,
+        _session: SessionData,
+        *,
+        memory_path: str,
+    ) -> None:
+        assert memory_path == "memory_system/MAINMEMORY.md"
         started.set()
         await release.wait()
 

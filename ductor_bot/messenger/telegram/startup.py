@@ -102,6 +102,7 @@ async def _run_primary_startup(bot: TelegramBot) -> None:
 
     bot._orch.wire_observers_to_bus(bot._bus, wake_handler=bot._handle_webhook_wake)
     bot._orchestrator.set_config_hot_reload_handler(bot._on_auth_hot_reload)
+    bot._orchestrator.set_access_user_resolver(bot._resolve_access_username)
 
     async def _validate_chat(chat_id: int) -> bool:
         try:

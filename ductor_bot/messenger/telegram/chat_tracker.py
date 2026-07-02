@@ -36,12 +36,26 @@ class ChatRecord:
     rejected_count: int = 0
 
 
+@dataclass
+class UserRecord:
+    """A Telegram user the bot has seen in private/group updates."""
+
+    user_id: int
+    username: str = ""
+    first_name: str = ""
+    last_name: str = ""
+    first_seen: str = field(default_factory=_now_iso)
+    last_seen: str = field(default_factory=_now_iso)
+    allowed: bool = False
+
+
 class ChatTracker:
     """In-memory tracker backed by a JSON file."""
 
     def __init__(self, path: Path) -> None:
         self._path = path
         self._records: dict[int, ChatRecord] = {}
+        self._users: dict[int, UserRecord] = {}
         self._load()
 
     # -- Public API -----------------------------------------------------------
@@ -118,6 +132,46 @@ class ChatTracker:
         """Return all records sorted by last_seen (newest first)."""
         return sorted(self._records.values(), key=lambda r: r.last_seen, reverse=True)
 
+    def record_user(
+        self,
+        user_id: int,
+        *,
+        username: str = "",
+        first_name: str = "",
+        last_name: str = "",
+        allowed: bool = False,
+    ) -> None:
+        """Record a Telegram user so admins can later grant access by username."""
+        existing = self._users.get(user_id)
+        now = _now_iso()
+        if existing:
+            existing.username = username or existing.username
+            existing.first_name = first_name or existing.first_name
+            existing.last_name = last_name or existing.last_name
+            existing.last_seen = now
+            existing.allowed = allowed or existing.allowed
+        else:
+            self._users[user_id] = UserRecord(
+                user_id=user_id,
+                username=username,
+                first_name=first_name,
+                last_name=last_name,
+                first_seen=now,
+                last_seen=now,
+                allowed=allowed,
+            )
+        self._save()
+
+    def resolve_username(self, username: str) -> int | None:
+        """Return a user id for a previously seen Telegram username."""
+        wanted = username.lstrip("@").lower()
+        if not wanted:
+            return None
+        for rec in self._users.values():
+            if rec.username.lower() == wanted:
+                return rec.user_id
+        return None
+
     # -- Persistence ----------------------------------------------------------
 
     def _load(self) -> None:
@@ -128,8 +182,15 @@ class ChatTracker:
         for key, val in records.items():
             if isinstance(val, dict) and "chat_id" in val:
                 self._records[int(key)] = ChatRecord(**val)
+        users: dict[str, Any] = raw.get("users", {})
+        for key, val in users.items():
+            if isinstance(val, dict) and "user_id" in val:
+                self._users[int(key)] = UserRecord(**val)
 
     def _save(self) -> None:
-        data = {"records": {str(k): asdict(v) for k, v in self._records.items()}}
+        data = {
+            "records": {str(k): asdict(v) for k, v in self._records.items()},
+            "users": {str(k): asdict(v) for k, v in self._users.items()},
+        }
         self._path.parent.mkdir(parents=True, exist_ok=True)
         atomic_json_save(self._path, data)

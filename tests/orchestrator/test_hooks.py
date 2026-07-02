@@ -105,12 +105,29 @@ class TestMainmemoryReminder:
     def test_fires_on_6th(self) -> None:
         assert MAINMEMORY_REMINDER.condition(_ctx(message_count=5)) is True
 
+    def test_fires_with_scoped_memory_when_global_memory_denied(self) -> None:
+        ctx = HookContext(
+            chat_id=1,
+            message_count=5,
+            is_new_session=False,
+            provider="claude",
+            model="opus",
+            global_memory_allowed=False,
+            memory_path="memory_system/users/2/MAINMEMORY.md",
+        )
+        assert MAINMEMORY_REMINDER.condition(ctx) is True
+        suffix = MAINMEMORY_REMINDER.suffix(ctx)
+        assert "memory_system/users/2/MAINMEMORY.md" in suffix
+        assert "user_tools" not in suffix
+
     def test_does_not_fire_on_5th(self) -> None:
         assert MAINMEMORY_REMINDER.condition(_ctx(message_count=4)) is False
 
     def test_suffix_contains_key_phrases(self) -> None:
-        assert "MAINMEMORY.md" in MAINMEMORY_REMINDER.suffix
-        assert "MEMORY CHECK" in MAINMEMORY_REMINDER.suffix
+        assert callable(MAINMEMORY_REMINDER.suffix)
+        suffix = MAINMEMORY_REMINDER.suffix(_ctx())
+        assert "MAINMEMORY.md" in suffix
+        assert "MEMORY CHECK" in suffix
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +154,7 @@ def orch(orch: Orchestrator) -> Orchestrator:
 
 async def test_hook_injects_into_prompt_on_6th_message(orch: Orchestrator) -> None:
     """After 5 successful messages, the 6th should carry the reminder."""
+    orch._config.allowed_user_ids = [1]
     resp = _mock_response()
     mock_execute = AsyncMock(return_value=resp)
     object.__setattr__(orch._cli_service, "execute", mock_execute)
@@ -156,6 +174,7 @@ async def test_hook_injects_into_prompt_on_6th_message(orch: Orchestrator) -> No
 
 async def test_hook_not_injected_before_6th(orch: Orchestrator) -> None:
     """Messages 1-5 should not carry the mainmemory reminder."""
+    orch._config.allowed_user_ids = [1]
     resp = _mock_response()
     mock_execute = AsyncMock(return_value=resp)
     object.__setattr__(orch._cli_service, "execute", mock_execute)
@@ -168,6 +187,7 @@ async def test_hook_not_injected_before_6th(orch: Orchestrator) -> None:
 
 async def test_hook_resets_on_new_session(orch: Orchestrator) -> None:
     """After session reset, counter restarts -- 6th from reset triggers hook."""
+    orch._config.allowed_user_ids = [1]
     resp = _mock_response()
     mock_execute = AsyncMock(return_value=resp)
     object.__setattr__(orch._cli_service, "execute", mock_execute)
@@ -186,6 +206,25 @@ async def test_hook_resets_on_new_session(orch: Orchestrator) -> None:
     assert "MEMORY CHECK" not in last_request.prompt
 
 
+async def test_hook_uses_scoped_memory_for_non_admin_on_6th_message(
+    orch: Orchestrator,
+) -> None:
+    orch._config.allowed_user_ids = [1, 2]
+    resp = _mock_response()
+    mock_execute = AsyncMock(return_value=resp)
+    object.__setattr__(orch._cli_service, "execute", mock_execute)
+    key = SessionKey(chat_id=2, user_id=2)
+
+    for _ in range(6):
+        await normal(orch, key, "msg")
+
+    sixth_call = mock_execute.call_args_list[5]
+    request = sixth_call[0][0]
+    assert "MEMORY CHECK" in request.prompt
+    assert "memory_system/users/2/MAINMEMORY.md" in request.prompt
+    assert "user_tools" not in request.prompt
+
+
 # ---------------------------------------------------------------------------
 # Memory reflection hook (#65)
 # ---------------------------------------------------------------------------
@@ -202,6 +241,17 @@ class TestMemoryReflectionHook:
         # Every 4 messages: count=3 (pre-increment -> 4th message) fires.
         assert hook.condition(_ctx(message_count=3)) is True
         assert hook.condition(_ctx(message_count=2)) is False
+        scoped = HookContext(
+            chat_id=1,
+            message_count=3,
+            is_new_session=False,
+            provider="claude",
+            model="opus",
+            global_memory_allowed=False,
+            memory_path="memory_system/users/2/MAINMEMORY.md",
+        )
+        assert hook.condition(scoped) is True
+        assert "memory_system/users/2/MAINMEMORY.md" in hook.suffix(scoped)
 
     def test_build_memory_reflection_hook_uses_configured_prompt(self) -> None:
         """Factory threads prompt content into hook.suffix verbatim."""
@@ -211,7 +261,8 @@ class TestMemoryReflectionHook:
         hook = build_memory_reflection_hook(
             MemoryReflectionConfig(prompt="custom reflection prompt")
         )
-        assert hook.suffix == "custom reflection prompt"
+        assert callable(hook.suffix)
+        assert hook.suffix(_ctx()) == "custom reflection prompt"
 
 
 async def test_reflection_hook_not_registered_when_disabled(

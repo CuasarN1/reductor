@@ -77,6 +77,21 @@ async def test_memory_flusher_fires_silent_turn_after_boundary(tmp_path: Path) -
     assert request.process_label == "memory_flush"
 
 
+async def test_memory_flusher_uses_scoped_memory_path(tmp_path: Path) -> None:
+    """Scoped memory paths rewrite the silent flush prompt away from global memory."""
+    flusher, cli = _make_flusher(tmp_path, compact_cfg=MemoryCompactionConfig(enabled=False))
+    key = SessionKey(chat_id=101)
+    session = _session_with_id("sess-abc")
+    memory_path = "memory_system/users/2/MAINMEMORY.md"
+
+    flusher.mark_boundary(key)
+    await flusher.maybe_flush(key, session, memory_path=memory_path)
+
+    request = cli.execute.await_args[0][0]
+    assert memory_path in request.prompt
+    assert "review the recent conversation" in request.prompt
+
+
 async def test_memory_flusher_dedup_within_window(tmp_path: Path) -> None:
     """Two boundaries within dedup_seconds cause only one flush."""
     flusher, cli = _make_flusher(

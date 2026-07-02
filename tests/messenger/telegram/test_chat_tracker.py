@@ -63,6 +63,7 @@ class TestChatTracker:
         tracker = ChatTracker(path)
         tracker.record_join(-1001, "supergroup", "Persistent Group", allowed=True)
         tracker.record_rejected(-2002, "group", "Bad Group")
+        tracker.record_user(222, username="somebody", first_name="Some", allowed=False)
 
         # Load a fresh tracker from the same file
         tracker2 = ChatTracker(path)
@@ -70,6 +71,17 @@ class TestChatTracker:
         assert len(records) == 2
         ids = {r.chat_id for r in records}
         assert ids == {-1001, -2002}
+        assert tracker2.resolve_username("@somebody") == 222
+        assert tracker2.resolve_username("SOMEBODY") == 222
+
+    def test_record_user_updates_username(self, tmp_path: Path) -> None:
+        tracker = ChatTracker(tmp_path / "chat.json")
+        tracker.record_user(222, username="", first_name="Some", allowed=False)
+        tracker.record_user(222, username="somebody", first_name="", allowed=True)
+
+        assert tracker.resolve_username("somebody") == 222
+        assert tracker._users[222].first_name == "Some"
+        assert tracker._users[222].allowed is True
 
     def test_get_all_sorted_by_last_seen(self, tmp_path: Path) -> None:
         tracker = ChatTracker(tmp_path / "chat.json")

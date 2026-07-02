@@ -270,7 +270,7 @@ unknown_action = "Tindakan tidak dikenal. Daftar cron disegarkan."
 # -- Welcome (Telegram) -------------------------------------------------------
 
 [welcome]
-header = "**Selamat datang di ductor.dev{name}!**"
+header = "**Selamat datang di ReDuctor{name}!**"
 tagline = """\
 Deploy dari saku Anda. Otomatisasi dari sofa Anda.
 Claude Code, Codex & Gemini -- langsung dari Telegram."""
@@ -286,7 +286,7 @@ btn_system = "Lihat sistemnya!"
 btn_who = "Siapa kamu? Siapa aku?"
 
 prompt_know = """\
-Hei, saya baru menyiapkan ductor.dev dan ingin kamu mengenalku. \
+Hei, saya baru menyiapkan ReDuctor dan ingin kamu mengenalku. \
 Tanyakan semua yang perlu kamu tahu agar kita bisa bekerja sama dengan baik -- \
 namaku, apa yang kulakukan, apa yang sedang kukerjakan, bagaimana aku suka berkomunikasi. \
 Simpan apa yang kamu pelajari ke memorimu."""
@@ -301,7 +301,7 @@ Kemudian tanya siapa aku dan apa yang perlu kubantuan."""
 # -- Info ----------------------------------------------------------------------
 
 [info]
-header = "**ductor.dev**"
+header = "**ReDuctor**"
 version = "Versi: `{version}`"
 telegram_description = "Agen AI coding (Claude, Codex, Gemini) di Telegram.\nSesi bernama, memori persisten, cron job, webhook, streaming langsung."
 matrix_description = "Agen AI coding (Claude, Codex, Gemini) di Matrix.\nSesi bernama, memori persisten, cron job, webhook, streaming langsung."

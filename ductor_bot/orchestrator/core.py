@@ -71,6 +71,11 @@ from ductor_bot.orchestrator.hooks import (
 )
 from ductor_bot.orchestrator.memory_flush import MemoryFlusher
 from ductor_bot.orchestrator.observers import ObserverManager
+from ductor_bot.orchestrator.privacy import (
+    can_access_global_memory,
+    global_memory_denied_text,
+    is_global_memory_disclosure_request,
+)
 from ductor_bot.orchestrator.providers import ProviderManager
 from ductor_bot.orchestrator.registry import CommandRegistry, OrchestratorResult
 from ductor_bot.security import detect_suspicious_patterns
@@ -96,6 +101,7 @@ logger = logging.getLogger(__name__)
 _TextCallback = Callable[[str], Awaitable[None]]
 _SystemStatusCallback = Callable[[str | None], Awaitable[None]]
 _ReasoningCallback = Callable[[str], Awaitable[None]]
+_AccessUserResolver = Callable[[str], Awaitable[int | None]]
 
 
 @dataclass(slots=True)
@@ -219,6 +225,7 @@ class Orchestrator:
             self._hook_registry.register(build_memory_reflection_hook(config.memory_reflection))
         self._supervisor: AgentSupervisor | None = None  # Set by AgentSupervisor after creation
         self._task_hub: TaskHub | None = None  # Set by supervisor or __main__.py
+        self._access_user_resolver: _AccessUserResolver | None = None
         self._command_registry = CommandRegistry()
         self._register_commands()
 
@@ -280,6 +287,16 @@ class Orchestrator:
         """Inject the task hub (called by supervisor or startup wiring)."""
         self._task_hub = hub
         hub.start_maintenance()
+
+    def set_access_user_resolver(self, resolver: _AccessUserResolver | None) -> None:
+        """Inject a transport-specific username -> user id resolver for /access."""
+        self._access_user_resolver = resolver
+
+    async def resolve_access_username(self, username: str) -> int | None:
+        """Resolve a username for access commands when the transport supports it."""
+        if self._access_user_resolver is None:
+            return None
+        return await self._access_user_resolver(username)
 
     @classmethod
     async def create(
@@ -363,7 +380,7 @@ class Orchestrator:
             logger.exception("Unexpected error in handle_message")
             return OrchestratorResult(text="An internal error occurred. Please try again.")
 
-    async def _route_message(  # noqa: C901, PLR0911
+    async def _route_message(  # noqa: C901, PLR0911, PLR0912
         self, dispatch: _MessageDispatch
     ) -> OrchestratorResult:
         result = await self._command_registry.dispatch(
@@ -380,6 +397,12 @@ class Orchestrator:
             if is_model_policy_admin(self._config, user_id):
                 return OrchestratorResult(text=access_change_command_guidance_text())
             return OrchestratorResult(text=access_change_denied_text())
+
+        if is_global_memory_disclosure_request(dispatch.text) and not can_access_global_memory(
+            self._config,
+            dispatch.key,
+        ):
+            return OrchestratorResult(text=global_memory_denied_text())
 
         await self._ensure_docker()
 

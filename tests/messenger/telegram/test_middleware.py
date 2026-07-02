@@ -56,6 +56,22 @@ class TestAuthMiddleware:
         handler.assert_not_called()
         assert result is None
 
+    async def test_seen_user_callback_records_rejected_user(self) -> None:
+        from ductor_bot.messenger.telegram.middleware import AuthMiddleware
+
+        seen = MagicMock()
+        mw = AuthMiddleware(allowed_user_ids={100}, on_user_seen=seen)
+        handler = AsyncMock()
+        msg = _make_message(user_id=999)
+        msg.from_user.username = "missing_user"
+        msg.from_user.first_name = "Missing"
+        msg.from_user.last_name = "User"
+
+        result = await mw(handler, msg, {})
+
+        assert result is None
+        seen.assert_called_once_with(999, "missing_user", "Missing", "User", False)
+
     async def test_no_from_user_dropped(self) -> None:
         from ductor_bot.messenger.telegram.middleware import AuthMiddleware
 

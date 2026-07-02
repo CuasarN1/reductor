@@ -88,6 +88,9 @@ def is_quick_command(text: str, bot_username: str | None = None) -> bool:
 RejectedCallback = Callable[[int, str, str], None]
 """Sync callback for rejected group messages: (chat_id, chat_type, title)."""
 
+UserSeenCallback = Callable[[int, str, str, str, bool], None]
+"""Sync callback for seen Telegram users: (id, username, first, last, allowed)."""
+
 
 def _message_text_preview(event: Message | CallbackQuery) -> str:
     """Return a short text preview for auth logs."""
@@ -137,10 +140,23 @@ class AuthMiddleware(BaseMiddleware):
         *,
         allowed_group_ids: set[int] | None = None,
         on_rejected: RejectedCallback | None = None,
+        on_user_seen: UserSeenCallback | None = None,
     ) -> None:
         self._allowed_users = allowed_user_ids
         self._allowed_groups = allowed_group_ids or set()
         self._on_rejected = on_rejected
+        self._on_user_seen = on_user_seen
+
+    def _record_user_seen(self, user: Any, *, allowed: bool) -> None:
+        if self._on_user_seen is None:
+            return
+        self._on_user_seen(
+            int(getattr(user, "id", 0)),
+            str(getattr(user, "username", "") or ""),
+            str(getattr(user, "first_name", "") or ""),
+            str(getattr(user, "last_name", "") or ""),
+            allowed,
+        )
 
     async def __call__(
         self,
@@ -163,6 +179,7 @@ class AuthMiddleware(BaseMiddleware):
         if chat_type in ("group", "supergroup"):
             group_id = chat.id if chat else None
             if group_id not in self._allowed_groups:
+                self._record_user_seen(user, allowed=False)
                 logger.info(
                     "Auth rejected Telegram group message: group not allowed chat_id=%s "
                     "chat_type=%s title=%r user_id=%s username=%r text=%r",
@@ -177,6 +194,7 @@ class AuthMiddleware(BaseMiddleware):
                     self._on_rejected(chat.id, chat_type, chat.title or "")
                 return None
             if user.id not in self._allowed_users:
+                self._record_user_seen(user, allowed=False)
                 sender_chat = (
                     getattr(event, "sender_chat", None) if isinstance(event, Message) else None
                 )
@@ -195,6 +213,7 @@ class AuthMiddleware(BaseMiddleware):
                 )
                 return None
         elif user.id not in self._allowed_users:
+            self._record_user_seen(user, allowed=False)
             logger.info(
                 "Auth rejected Telegram private/callback event: user not allowed user_id=%s username=%r",
                 getattr(user, "id", None),
@@ -202,6 +221,7 @@ class AuthMiddleware(BaseMiddleware):
             )
             return None
 
+        self._record_user_seen(user, allowed=True)
         return await handler(event, data)
 
 

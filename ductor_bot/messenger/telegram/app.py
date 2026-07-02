@@ -102,6 +102,7 @@ logger = logging.getLogger(__name__)
 
 _WELCOME_IMAGE = Path(__file__).resolve().parent / "ductor_images" / "welcome.png"
 _CAPTION_LIMIT = 1024
+REDUCTOR_REPO_URL = "https://github.com/CuasarN1/reductor"
 
 # Backward-compatible patch points used by tests.
 TypingContext = _TypingContext
@@ -247,11 +248,21 @@ class TelegramBot:
         self._sequential.set_abort_all_handler(self._on_abort_all)
         self._sequential.set_quick_command_handler(self._on_quick_command)
         on_rejected = self._on_group_rejected
-        auth = AuthMiddleware(allowed, allowed_group_ids=allowed_groups, on_rejected=on_rejected)
+        auth = AuthMiddleware(
+            allowed,
+            allowed_group_ids=allowed_groups,
+            on_rejected=on_rejected,
+            on_user_seen=self._on_user_seen,
+        )
         self._router.message.outer_middleware(auth)
         self._router.message.outer_middleware(self._sequential)
         self._router.callback_query.outer_middleware(
-            AuthMiddleware(allowed, allowed_group_ids=allowed_groups, on_rejected=on_rejected)
+            AuthMiddleware(
+                allowed,
+                allowed_group_ids=allowed_groups,
+                on_rejected=on_rejected,
+                on_user_seen=self._on_user_seen,
+            )
         )
 
         self._register_handlers()
@@ -478,6 +489,44 @@ class TelegramBot:
         """Callback from AuthMiddleware when a group message is rejected."""
         if self._chat_tracker:
             self._chat_tracker.record_rejected(chat_id, chat_type, title)
+
+    def _on_user_seen(
+        self,
+        user_id: int,
+        username: str,
+        first_name: str,
+        last_name: str,
+        allowed: bool,
+    ) -> None:
+        """Callback from AuthMiddleware when any Telegram user reaches auth."""
+        if self._chat_tracker and user_id > 0:
+            self._chat_tracker.record_user(
+                user_id,
+                username=username,
+                first_name=first_name,
+                last_name=last_name,
+                allowed=allowed,
+            )
+
+    async def _resolve_access_username(self, username: str) -> int | None:
+        """Resolve a Telegram username to a private user id for /access."""
+        normalized = username.lstrip("@").strip()
+        if not normalized:
+            return None
+        if self._chat_tracker:
+            known = self._chat_tracker.resolve_username(normalized)
+            if known is not None:
+                return known
+        try:
+            chat = await self._bot.get_chat(f"@{normalized}")
+        except Exception:
+            logger.info("Could not resolve Telegram username @%s", normalized, exc_info=True)
+            return None
+        if getattr(chat, "type", None) != "private":
+            logger.info("Telegram username @%s resolved to non-private chat", normalized)
+            return None
+        chat_id = getattr(chat, "id", None)
+        return int(chat_id) if isinstance(chat_id, int) and chat_id > 0 else None
 
     async def _on_bot_added(self, event: ChatMemberUpdated) -> None:
         """Bot was added to a group or channel."""
@@ -823,11 +872,12 @@ class TelegramBot:
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="GitHub", url="https://github.com/PleasePrompto/ductor"
+                        text="GitHub",
+                        url=REDUCTOR_REPO_URL,
                     ),
                     InlineKeyboardButton(
                         text="Changelog",
-                        url="https://github.com/PleasePrompto/ductor/releases",
+                        url=f"{REDUCTOR_REPO_URL}/releases",
                     ),
                 ],
                 [InlineKeyboardButton(text="PyPI", url="https://pypi.org/project/ductor/")],

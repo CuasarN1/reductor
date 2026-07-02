@@ -26,10 +26,16 @@ from ductor_bot.model_policy import (
     subject_id_for_request,
 )
 from ductor_bot.orchestrator.hooks import HookContext
+from ductor_bot.orchestrator.privacy import (
+    apply_memory_scope_to_prompt,
+    ensure_memory_scope,
+    memory_scope_for_key,
+    memory_scope_instruction,
+)
 from ductor_bot.orchestrator.registry import OrchestratorResult
 from ductor_bot.session import SessionData, SessionKey
 from ductor_bot.text.response_format import session_error_text, timeout_error_text
-from ductor_bot.workspace.loader import read_mainmemory
+from ductor_bot.workspace.loader import read_file
 
 if TYPE_CHECKING:
     from ductor_bot.orchestrator.core import Orchestrator
@@ -58,10 +64,11 @@ def _schedule_memory_flush(orch: Orchestrator, key: SessionKey, session: Session
     flusher = orch._memory_flusher
     if flusher is None:
         return
+    scope = memory_scope_for_key(orch.paths, orch._config, key)
 
     async def _run() -> None:
         try:
-            await flusher.maybe_flush(key, session)
+            await flusher.maybe_flush(key, session, memory_path=scope.relative_path)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -143,11 +150,20 @@ async def _prepare_normal(
         session.message_count,
     )
 
+    memory_scope = memory_scope_for_key(orch.paths, orch._config, key)
+    await asyncio.to_thread(ensure_memory_scope, memory_scope)
+
     append_prompt = None
     if is_new:
-        mainmemory = await asyncio.to_thread(read_mainmemory, orch.paths)
-        if mainmemory.strip():
+        mainmemory = await asyncio.to_thread(read_file, memory_scope.path)
+        if mainmemory and mainmemory.strip():
             append_prompt = mainmemory
+
+        scope_instruction = memory_scope_instruction(memory_scope)
+        if scope_instruction:
+            append_prompt = (
+                f"{append_prompt}\n\n{scope_instruction}" if append_prompt else scope_instruction
+            )
 
         roster = _build_agent_roster(orch)
         if roster:
@@ -159,6 +175,8 @@ async def _prepare_normal(
         is_new_session=is_new,
         provider=req_provider,
         model=req_model,
+        global_memory_allowed=memory_scope.is_global,
+        memory_path=memory_scope.relative_path,
     )
     prompt = orch._hook_registry.apply(text, hook_ctx)
 
@@ -928,6 +946,8 @@ async def heartbeat_flow(
     effective_prompt = prompt or hb_cfg.prompt
     effective_ack = ack_token or hb_cfg.ack_token
     req_model, req_provider = orch.resolve_runtime_target(orch._config.model)
+    memory_scope = memory_scope_for_key(orch.paths, orch._config, key)
+    effective_prompt = apply_memory_scope_to_prompt(effective_prompt, memory_scope)
 
     # Read-only check: never create/overwrite a session from the heartbeat path.
     session = await orch._sessions.get_active(key)

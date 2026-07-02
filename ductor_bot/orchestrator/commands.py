@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from ductor_bot.cli.auth import check_all_auth
 from ductor_bot.i18n import t
 from ductor_bot.infra.version import check_pypi, get_current_version
+from ductor_bot.orchestrator.privacy import can_access_global_memory, global_memory_denied_text
 from ductor_bot.orchestrator.registry import OrchestratorResult
 from ductor_bot.orchestrator.selectors.cron_selector import cron_selector_start
 from ductor_bot.orchestrator.selectors.model_selector import model_selector_start, switch_model
@@ -63,9 +64,11 @@ async def cmd_model(orch: Orchestrator, key: SessionKey, text: str) -> Orchestra
     return OrchestratorResult(text=result_text)
 
 
-async def cmd_memory(orch: Orchestrator, _key: SessionKey, _text: str) -> OrchestratorResult:
+async def cmd_memory(orch: Orchestrator, key: SessionKey, _text: str) -> OrchestratorResult:
     """Handle /memory."""
     logger.info("Memory requested")
+    if not can_access_global_memory(orch._config, key):
+        return OrchestratorResult(text=global_memory_denied_text())
     content = await asyncio.to_thread(read_mainmemory, orch.paths)
     if not content.strip():
         return OrchestratorResult(

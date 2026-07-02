@@ -316,6 +316,27 @@ class TestOnHelp:
 
 
 # ---------------------------------------------------------------------------
+# _on_info
+# ---------------------------------------------------------------------------
+
+
+class TestOnInfo:
+    @patch("ductor_bot.messenger.telegram.app.send_rich", new_callable=AsyncMock)
+    async def test_info_buttons_link_to_reductor_fork(self, mock_send: AsyncMock) -> None:
+        from ductor_bot.messenger.telegram.app import REDUCTOR_REPO_URL
+
+        tg_bot, _ = _make_tg_bot()
+        msg = _make_message()
+
+        await tg_bot._on_info(msg)
+
+        opts = mock_send.call_args[0][3]
+        keyboard = opts.reply_markup
+        assert keyboard.inline_keyboard[0][0].url == REDUCTOR_REPO_URL
+        assert keyboard.inline_keyboard[0][1].url == f"{REDUCTOR_REPO_URL}/releases"
+
+
+# ---------------------------------------------------------------------------
 # _on_start / _show_welcome
 # ---------------------------------------------------------------------------
 
@@ -854,7 +875,7 @@ class TestCallbackQueryHandler:
 
         orch.handle_message_streaming.assert_called_once()
         sent_text = orch.handle_message_streaming.call_args[0][1]
-        assert "set up ductor.dev" in sent_text
+        assert "set up ReDuctor" in sent_text
 
     async def test_welcome_callback_shows_button_label_in_indicator(self) -> None:
         tg_bot, bot_instance = _make_tg_bot()

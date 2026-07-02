@@ -27,7 +27,11 @@ from typing import TYPE_CHECKING
 
 from ductor_bot.cli.types import AgentRequest
 from ductor_bot.errors import CLIError
-from ductor_bot.workspace.loader import read_mainmemory
+from ductor_bot.orchestrator.privacy import (
+    GLOBAL_MEMORY_RELATIVE_PATH,
+    apply_memory_scope_to_prompt,
+)
+from ductor_bot.workspace.loader import read_file
 
 if TYPE_CHECKING:
     from ductor_bot.bus.lock_pool import LockPool
@@ -88,23 +92,35 @@ class MemoryFlusher:
             return True
         return (time.monotonic() - last) > self._config.dedup_seconds
 
-    def should_compact(self) -> bool:
+    def should_compact(self, memory_path: str = GLOBAL_MEMORY_RELATIVE_PATH) -> bool:
         """True when compaction is enabled and MAINMEMORY.md exceeds threshold."""
         if not self._compaction.enabled:
             return False
-        content = read_mainmemory(self._paths)
+        content = read_file(self._paths.workspace / memory_path) or ""
         line_count = len(content.splitlines())
         return line_count >= self._compaction.trigger_lines
 
-    async def maybe_flush(self, key: SessionKey, session: SessionData) -> None:
+    async def maybe_flush(
+        self,
+        key: SessionKey,
+        session: SessionData,
+        *,
+        memory_path: str = GLOBAL_MEMORY_RELATIVE_PATH,
+    ) -> None:
         """Run the silent flush turn if due, and compaction if file is large."""
         if not self.should_flush(key):
             return
-        await self.flush(key, session)
-        if self.should_compact():
-            await self.compact(key, session)
+        await self.flush(key, session, memory_path=memory_path)
+        if self.should_compact(memory_path):
+            await self.compact(key, session, memory_path=memory_path)
 
-    async def flush(self, key: SessionKey, session: SessionData) -> None:
+    async def flush(
+        self,
+        key: SessionKey,
+        session: SessionData,
+        *,
+        memory_path: str = GLOBAL_MEMORY_RELATIVE_PATH,
+    ) -> None:
         """Run a silent flush turn resuming the current session."""
         session_id = session.session_id
         if not session_id:
@@ -113,7 +129,7 @@ class MemoryFlusher:
             return
 
         request = AgentRequest(
-            prompt=self._config.flush_prompt,
+            prompt=apply_memory_scope_to_prompt(self._config.flush_prompt, memory_path),
             chat_id=key.chat_id,
             topic_id=key.topic_id,
             transport=key.transport,
@@ -130,7 +146,13 @@ class MemoryFlusher:
             self._last_flushed[key] = time.monotonic()
             self._boundary_seen.discard(key)
 
-    async def compact(self, key: SessionKey, session: SessionData) -> None:
+    async def compact(
+        self,
+        key: SessionKey,
+        session: SessionData,
+        *,
+        memory_path: str = GLOBAL_MEMORY_RELATIVE_PATH,
+    ) -> None:
         """Run a silent compaction turn resuming the current session."""
         session_id = session.session_id
         if not session_id:
@@ -140,7 +162,7 @@ class MemoryFlusher:
             )
             return
 
-        prompt = self._render_compact_prompt()
+        prompt = apply_memory_scope_to_prompt(self._render_compact_prompt(), memory_path)
         request = AgentRequest(
             prompt=prompt,
             chat_id=key.chat_id,

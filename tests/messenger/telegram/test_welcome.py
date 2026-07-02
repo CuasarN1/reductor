@@ -46,7 +46,7 @@ class TestBuildWelcomeText:
         }
         text = build_welcome_text("Alice", auth_results, _config(model="sonnet"))
 
-        assert "Welcome to ductor.dev, Alice!" in text
+        assert "Welcome to ReDuctor, Alice!" in text
         assert "Claude Code + Codex authenticated" in text
         assert "Sonnet" in text
 
@@ -114,14 +114,14 @@ class TestBuildWelcomeText:
         from ductor_bot.messenger.telegram.welcome import build_welcome_text
 
         text = build_welcome_text("Zara", {}, _config())
-        assert "Welcome to ductor.dev, Zara!" in text
+        assert "Welcome to ReDuctor, Zara!" in text
 
     def test_user_name_empty(self) -> None:
         from ductor_bot.messenger.telegram.welcome import build_welcome_text
 
         text = build_welcome_text("", {}, _config())
-        assert "Welcome to ductor.dev!" in text
-        assert "Welcome to ductor.dev, " not in text
+        assert "Welcome to ReDuctor!" in text
+        assert "Welcome to ReDuctor, " not in text
 
     def test_static_content_present(self) -> None:
         from ductor_bot.messenger.telegram.welcome import build_welcome_text
@@ -296,7 +296,7 @@ class TestResolveWelcomeCallback:
     @pytest.mark.parametrize(
         ("key", "expected_substring"),
         [
-            ("w:1", "ductor.dev"),
+            ("w:1", "reductor"),
             ("w:2", "system"),
             ("w:3", "introduce"),
         ],

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 from collections.abc import Awaitable, Callable
+from re import fullmatch
 from typing import TYPE_CHECKING, cast
 
 from ductor_bot.config import ModelPolicyRule, update_config_file_async
@@ -31,6 +32,7 @@ _OPTION_ALIASES = {
     "switch": "switch",
 }
 _POLICY_OPTION_KEYS = frozenset({"efforts", "models", "switch"})
+_USERNAME_PATTERN = r"@?[A-Za-z][A-Za-z0-9_]{4,31}"
 
 
 async def cmd_access(orch: Orchestrator, key: SessionKey, text: str) -> OrchestratorResult:
@@ -67,20 +69,21 @@ def _help_text() -> str:
         "\n"
         "Commands:\n"
         "- `/access list`\n"
-        "- `/access add <user_id> [models=...] [efforts=...] [switch=on|off] "
+        "- `/access add <user_id|@username> [models=...] [efforts=...] [switch=on|off] "
         "[admin=on|off]`\n"
-        "- `/access policy <user_id> [models=...] [efforts=...] [switch=on|off] "
+        "- `/access policy <user_id|@username> [models=...] [efforts=...] [switch=on|off] "
         "[admin=on|off]`\n"
         "- `/access default [models=...] [efforts=...] [switch=on|off]`\n"
         "- `/access group list`\n"
         "- `/access group add <group_id>`\n"
         "- `/access group remove <group_id>`\n"
-        "- `/access admin <user_id> on|off`\n"
-        "- `/access remove <user_id>`\n"
+        "- `/access admin <user_id|@username> on|off`\n"
+        "- `/access remove <user_id|@username>`\n"
         "\n"
         "Examples:\n"
         "- `/access add 123456789 models=gpt-5.4-mini,gpt-5.4 efforts=low,medium "
         "switch=off`\n"
+        "- `/access add @somebody`\n"
         "- `/access policy 123456789 models=* efforts=* switch=on`\n"
         "- `/access group add -1001234567890`"
     )
@@ -94,6 +97,35 @@ def _parse_user_id(raw: str) -> tuple[int | None, str | None]:
     if user_id <= 0:
         return None, f"Telegram user ID must be positive: `{raw}`."
     return user_id, None
+
+
+def _normalize_username(raw: str) -> str | None:
+    value = raw.strip()
+    if not fullmatch(_USERNAME_PATTERN, value):
+        return None
+    return value.lstrip("@")
+
+
+async def _resolve_user_ref(orch: Orchestrator, raw: str) -> tuple[int | None, str | None]:
+    """Resolve a user target accepted by /access: numeric id or @username."""
+    user_id, id_error = _parse_user_id(raw)
+    if user_id is not None:
+        return user_id, None
+    if raw.strip().lstrip("-").isdigit():
+        return None, id_error
+
+    username = _normalize_username(raw)
+    if username is None:
+        return None, f"Invalid Telegram user target `{raw}`; use a numeric ID or @username."
+
+    resolved = await orch.resolve_access_username(username)
+    if resolved is None:
+        return (
+            None,
+            f"Could not resolve Telegram username `@{username}` to a private user. "
+            "Ask them to message the bot once, then retry, or use their numeric Telegram ID.",
+        )
+    return resolved, None
 
 
 def _parse_group_id(raw: str) -> tuple[int | None, str | None]:
@@ -152,7 +184,8 @@ def _parse_options(
     return positionals, options, None
 
 
-def _parse_policy_target(
+async def _parse_policy_target(
+    orch: Orchestrator,
     args: list[str],
     *,
     usage: str,
@@ -164,9 +197,9 @@ def _parse_policy_target(
     if len(positionals) != 1:
         return None, {}, OrchestratorResult(text=usage)
 
-    user_id, error = _parse_user_id(positionals[0])
+    user_id, error = await _resolve_user_ref(orch, positionals[0])
     if error is not None or user_id is None:
-        return None, {}, OrchestratorResult(text=error or "Invalid Telegram user ID.")
+        return None, {}, OrchestratorResult(text=error or "Invalid Telegram user target.")
     return user_id, options, None
 
 
@@ -357,11 +390,11 @@ async def _add_user(orch: Orchestrator, args: list[str]) -> OrchestratorResult:
     if error is not None:
         return OrchestratorResult(text=error)
     if len(positionals) != 1:
-        return OrchestratorResult(text="Usage: `/access add <user_id> [models=...] [efforts=...] [switch=on|off] [admin=on|off]`")
+        return OrchestratorResult(text="Usage: `/access add <user_id|@username> [models=...] [efforts=...] [switch=on|off] [admin=on|off]`")
 
-    user_id, error = _parse_user_id(positionals[0])
+    user_id, error = await _resolve_user_ref(orch, positionals[0])
     if error is not None or user_id is None:
-        return OrchestratorResult(text=error or "Invalid Telegram user ID.")
+        return OrchestratorResult(text=error or "Invalid Telegram user target.")
 
     admin_state: bool | None = None
     if "admin" in options:
@@ -391,11 +424,14 @@ async def _add_user(orch: Orchestrator, args: list[str]) -> OrchestratorResult:
     )
 
 
-async def _set_user_policy(orch: Orchestrator, args: list[str]) -> OrchestratorResult:
-    user_id, options, parse_error = _parse_policy_target(
+async def _set_user_policy(  # noqa: PLR0911
+    orch: Orchestrator, args: list[str]
+) -> OrchestratorResult:
+    user_id, options, parse_error = await _parse_policy_target(
+        orch,
         args,
         usage=(
-            "Usage: `/access policy <user_id> [models=...] [efforts=...] "
+            "Usage: `/access policy <user_id|@username> [models=...] [efforts=...] "
             "[switch=on|off] [admin=on|off]`"
         ),
         allowed=frozenset({"admin", "efforts", "models", "switch"}),
@@ -423,6 +459,8 @@ async def _set_user_policy(orch: Orchestrator, args: list[str]) -> OrchestratorR
         admin_state, error = _parse_bool(options["admin"])
         if error is not None:
             return OrchestratorResult(text=error)
+        if admin_state is None:
+            return OrchestratorResult(text="Invalid admin state.")
         _set_policy_admin(orch, user_id, enabled=admin_state)
 
     rule = _user_rule(orch, user_id, admin=admin_state is True and not policy_options)
@@ -515,11 +553,11 @@ async def _set_admin(orch: Orchestrator, args: list[str]) -> OrchestratorResult:
     if error is not None:
         return OrchestratorResult(text=error)
     if options or len(positionals) != 2:
-        return OrchestratorResult(text="Usage: `/access admin <user_id> on|off`")
+        return OrchestratorResult(text="Usage: `/access admin <user_id|@username> on|off`")
 
-    user_id, error = _parse_user_id(positionals[0])
+    user_id, error = await _resolve_user_ref(orch, positionals[0])
     if error is not None or user_id is None:
-        return OrchestratorResult(text=error or "Invalid Telegram user ID.")
+        return OrchestratorResult(text=error or "Invalid Telegram user target.")
     enabled, error = _parse_bool(positionals[1])
     if error is not None or enabled is None:
         return OrchestratorResult(text=error or "Invalid admin state.")
@@ -545,11 +583,11 @@ async def _remove_user(orch: Orchestrator, args: list[str]) -> OrchestratorResul
     if error is not None:
         return OrchestratorResult(text=error)
     if options or len(positionals) != 1:
-        return OrchestratorResult(text="Usage: `/access remove <user_id>`")
+        return OrchestratorResult(text="Usage: `/access remove <user_id|@username>`")
 
-    user_id, error = _parse_user_id(positionals[0])
+    user_id, error = await _resolve_user_ref(orch, positionals[0])
     if error is not None or user_id is None:
-        return OrchestratorResult(text=error or "Invalid Telegram user ID.")
+        return OrchestratorResult(text=error or "Invalid Telegram user target.")
     if user_id == _owner_id(orch):
         return OrchestratorResult(text="Refusing to remove the owner user. Put another owner first in allowed_user_ids manually if you need to rotate ownership.")
 

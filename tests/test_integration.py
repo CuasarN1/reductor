@@ -63,6 +63,7 @@ def workspace(tmp_path: Path) -> tuple[DuctorPaths, AgentConfig]:
     )
     init_workspace(paths)
     config = AgentConfig()
+    config.allowed_user_ids = [CHAT_ID]
     return paths, config
 
 

@@ -123,15 +123,27 @@ async def test_status_shows_streaming_visibility_flags(orch: Orchestrator) -> No
 
 
 async def test_memory_shows_content(orch: Orchestrator) -> None:
+    orch._config.allowed_user_ids = [1]
     orch.paths.mainmemory_path.write_text("# My Memories\n- Learned X")
-    result = await cmd_memory(orch, SessionKey(chat_id=0), "/memory")
+    result = await cmd_memory(orch, SessionKey(chat_id=1), "/memory")
     assert "My Memories" in result.text
 
 
 async def test_memory_empty(orch: Orchestrator) -> None:
+    orch._config.allowed_user_ids = [1]
     orch.paths.mainmemory_path.write_text("")
-    result = await cmd_memory(orch, SessionKey(chat_id=0), "/memory")
+    result = await cmd_memory(orch, SessionKey(chat_id=1), "/memory")
     assert "empty" in result.text.lower()
+
+
+async def test_memory_denies_non_admin(orch: Orchestrator) -> None:
+    orch._config.allowed_user_ids = [1, 2]
+    orch.paths.mainmemory_path.write_text("# Private")
+
+    result = await cmd_memory(orch, SessionKey(chat_id=2, user_id=2), "/memory")
+
+    assert "admin-only" in result.text
+    assert "Private" not in result.text
 
 
 # -- cmd_cron --

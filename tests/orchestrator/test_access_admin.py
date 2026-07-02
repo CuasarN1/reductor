@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import AsyncMock
 
 from ductor_bot.cli.types import AgentResponse
 from ductor_bot.config import ModelPolicyConfig
@@ -42,6 +43,34 @@ async def test_owner_adds_user_and_policy(orch: Orchestrator) -> None:
     assert policy["users"]["222"]["allowed_models"] == ["gpt-5.4-mini", "gpt-5.4"]
     assert policy["users"]["222"]["allowed_reasoning_efforts"] == ["low", "medium"]
     assert policy["users"]["222"]["allow_model_switch"] is False
+
+
+async def test_owner_adds_user_by_username(orch: Orchestrator) -> None:
+    orch._config.allowed_user_ids = [1]
+    orch.set_access_user_resolver(AsyncMock(return_value=222))
+
+    result = await cmd_access(
+        orch,
+        SessionKey(chat_id=1, user_id=1),
+        "/access add @somebody",
+    )
+
+    assert "222" in result.text
+    assert orch._config.allowed_user_ids == [1, 222]
+
+
+async def test_owner_add_username_reports_unresolved(orch: Orchestrator) -> None:
+    orch._config.allowed_user_ids = [1]
+    orch.set_access_user_resolver(AsyncMock(return_value=None))
+
+    result = await cmd_access(
+        orch,
+        SessionKey(chat_id=1, user_id=1),
+        "/access add @missing_user",
+    )
+
+    assert "Could not resolve" in result.text
+    assert orch._config.allowed_user_ids == [1]
 
 
 async def test_access_add_invalid_policy_option_does_not_mutate(orch: Orchestrator) -> None:
@@ -177,6 +206,39 @@ async def test_non_admin_group_access_request_is_denied_before_cli(
 
     assert "admin-only" in result.text
     orch._cli_service.execute.assert_not_awaited()
+
+
+async def test_non_admin_mainmemory_request_is_denied_before_cli(
+    orch: Orchestrator,
+) -> None:
+    orch._config.allowed_user_ids = [1, 2]
+
+    result = await orch.handle_message(
+        SessionKey(chat_id=2, user_id=2),
+        "Прочитай memory_system/MAINMEMORY.md",
+    )
+
+    assert "admin-only" in result.text
+    orch._cli_service.execute.assert_not_awaited()
+
+
+async def test_admin_mainmemory_request_reaches_cli(
+    orch: Orchestrator,
+) -> None:
+    orch._config.allowed_user_ids = [1]
+    orch._cli_service.execute.return_value = AgentResponse(
+        result="ok",
+        session_id="sess-admin",
+        is_error=False,
+    )
+
+    result = await orch.handle_message(
+        SessionKey(chat_id=1, user_id=1),
+        "Прочитай memory_system/MAINMEMORY.md",
+    )
+
+    assert result.text == "ok"
+    orch._cli_service.execute.assert_awaited()
 
 
 async def test_non_admin_user_access_request_is_denied_before_cli(

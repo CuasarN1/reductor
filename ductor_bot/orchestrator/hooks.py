@@ -7,10 +7,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ductor_bot.orchestrator.privacy import (
+    GLOBAL_MEMORY_RELATIVE_PATH,
+    apply_memory_scope_to_prompt,
+)
+
 if TYPE_CHECKING:
     from ductor_bot.config import MemoryReflectionConfig
 
 logger = logging.getLogger(__name__)
+
+HookSuffix = str | Callable[["HookContext"], str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +29,8 @@ class HookContext:
     is_new_session: bool
     provider: str
     model: str
+    global_memory_allowed: bool = True
+    memory_path: str = GLOBAL_MEMORY_RELATIVE_PATH
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +39,7 @@ class MessageHook:
 
     name: str
     condition: Callable[[HookContext], bool]
-    suffix: str
+    suffix: HookSuffix
 
 
 class MessageHookRegistry:
@@ -50,7 +59,8 @@ class MessageHookRegistry:
         for hook in self._hooks:
             if hook.condition(ctx):
                 logger.info("Hook fired: %s msgs=%d", hook.name, ctx.message_count)
-                suffixes.append(hook.suffix)
+                suffix = hook.suffix(ctx) if callable(hook.suffix) else hook.suffix
+                suffixes.append(suffix)
         if not suffixes:
             return prompt
         return prompt + "\n\n" + "\n\n".join(suffixes)
@@ -90,18 +100,31 @@ def _is_delegation_reminder_due(ctx: HookContext) -> bool:
 # Built-in hooks
 # ---------------------------------------------------------------------------
 
+def _mainmemory_reminder_suffix(ctx: HookContext) -> str:
+    if ctx.global_memory_allowed:
+        review_target = f"{ctx.memory_path}, user_tools/, cron_tasks/"
+        extra = ""
+    else:
+        review_target = ctx.memory_path
+        extra = (
+            f"\nDo not read or write `{GLOBAL_MEMORY_RELATIVE_PATH}` for this session."
+        )
+
+    return (
+        "## MEMORY CHECK\n"
+        f"Silently review: {review_target}.\n"
+        "Compare what you already know with this conversation so far.\n"
+        "If something important is missing from memory (personality, preferences, "
+        f"decisions, facts) -- update {ctx.memory_path} silently.\n"
+        "If you notice a gap that only the user can fill, ask ONE natural follow-up "
+        f"question that fits the current conversation. Do not interrogate.{extra}"
+    )
+
+
 MAINMEMORY_REMINDER = MessageHook(
     name="mainmemory_reminder",
     condition=every_n_messages(6),
-    suffix=(
-        "## MEMORY CHECK\n"
-        "Silently review: memory_system/MAINMEMORY.md, user_tools/, cron_tasks/.\n"
-        "Compare what you already know with this conversation so far.\n"
-        "If something important is missing from memory (personality, preferences, "
-        "decisions, facts) -- update MAINMEMORY.md silently.\n"
-        "If you notice a gap that only the user can fill, ask ONE natural follow-up "
-        "question that fits the current conversation. Do not interrogate."
-    ),
+    suffix=_mainmemory_reminder_suffix,
 )
 
 DELEGATION_BRIEF = MessageHook(
@@ -152,5 +175,5 @@ def build_memory_reflection_hook(
     return MessageHook(
         name="memory_reflection",
         condition=every_n_messages(config.every_n_messages),
-        suffix=config.prompt,
+        suffix=lambda ctx: apply_memory_scope_to_prompt(config.prompt, ctx.memory_path),
     )
