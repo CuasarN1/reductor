@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from ductor_bot.i18n import t
 from ductor_bot.infra.restart import consume_restart_sentinel
-from ductor_bot.infra.updater import UpdateObserver, consume_upgrade_sentinel
+from ductor_bot.infra.updater import UpdateObserver, consume_upgrade_sentinel, make_update_checker
 from ductor_bot.infra.version import get_current_version
 
 if TYPE_CHECKING:
@@ -123,7 +123,10 @@ async def _run_primary_startup(bot: TelegramBot) -> None:
     from ductor_bot.infra.install import is_upgradeable
 
     if is_upgradeable() and bot.config.update_check and bot._agent_name == "main":
-        bot._update_observer = UpdateObserver(notify=bot._on_update_available)
+        bot._update_observer = UpdateObserver(
+            notify=bot._on_update_available,
+            check=make_update_checker(bot.config),
+        )
         bot._update_observer.start()
 
 

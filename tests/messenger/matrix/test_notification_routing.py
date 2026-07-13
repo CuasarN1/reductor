@@ -151,8 +151,9 @@ async def test_matrix_startup_wires_notify_upgrade_on_update(
     captured: dict[str, Any] = {}
 
     class _FakeObserver:
-        def __init__(self, *, notify: Any) -> None:
+        def __init__(self, *, notify: Any, check: Any = None) -> None:
             captured["notify"] = notify
+            captured["check"] = check
 
         def start(self) -> None:
             captured["started"] = True
@@ -201,6 +202,7 @@ async def test_matrix_startup_wires_notify_upgrade_on_update(
     await startup_module.run_matrix_startup(bot)
 
     assert "notify" in captured, "UpdateObserver was not wired"
+    assert "check" in captured, "UpdateObserver checker was not wired"
 
     # Fire the captured callback with a fake VersionInfo and assert routing.
     version_info = MagicMock()

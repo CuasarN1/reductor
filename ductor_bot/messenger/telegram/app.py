@@ -173,9 +173,15 @@ class TelegramNotificationService:
 
     async def notify_all(self, text: str) -> None:
         for uid in self._config.allowed_user_ids:
-            await send_rich(self._bot, uid, text, None)
+            try:
+                await send_rich(self._bot, uid, text, None)
+            except TelegramAPIError:
+                logger.warning("Notification to user %d failed, skipping", uid)
         for gid in self._config.allowed_group_ids:
-            await send_rich(self._bot, gid, text, None)
+            try:
+                await send_rich(self._bot, gid, text, None)
+            except TelegramAPIError:
+                logger.warning("Notification to group %d failed, skipping", gid)
 
 
 class TelegramBot:

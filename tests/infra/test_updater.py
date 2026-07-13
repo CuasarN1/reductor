@@ -7,10 +7,12 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from ductor_bot.config import AgentConfig, NotificationsConfig
 from ductor_bot.infra.updater import (
     UpdateObserver,
     _build_upgrade_command,
     consume_upgrade_sentinel,
+    make_update_checker,
     perform_upgrade_pipeline,
     write_upgrade_sentinel,
 )
@@ -273,3 +275,54 @@ class TestUpdateObserver:
             await observer.stop()
 
         assert notify.call_count == 2
+
+
+class TestMakeUpdateChecker:
+    """Test configured update-check source selection."""
+
+    async def test_default_checks_reductor_github_releases(self) -> None:
+        cfg = AgentConfig(telegram_token="test-token")
+        expected = VersionInfo(
+            current="0.18.12",
+            latest="0.19.0",
+            update_available=True,
+            summary="",
+            source="github",
+            source_repo="CuasarN1/reductor",
+        )
+        checker = make_update_checker(cfg)
+
+        with patch(
+            "ductor_bot.infra.updater.check_github_release",
+            AsyncMock(return_value=expected),
+        ) as mock_check:
+            result = await checker()
+
+        assert result == expected
+        mock_check.assert_awaited_once_with(
+            repo="CuasarN1/reductor",
+            releases_url="",
+            include_prereleases=False,
+        )
+
+    async def test_pypi_source_keeps_package_flow(self) -> None:
+        cfg = AgentConfig(
+            telegram_token="test-token",
+            notifications=NotificationsConfig(update_source="pypi"),
+        )
+        expected = VersionInfo(
+            current="1.0.0",
+            latest="2.0.0",
+            update_available=True,
+            summary="",
+        )
+        checker = make_update_checker(cfg)
+
+        with patch(
+            "ductor_bot.infra.updater.check_pypi",
+            AsyncMock(return_value=expected),
+        ) as mock_check:
+            result = await checker()
+
+        assert result == expected
+        mock_check.assert_awaited_once_with()

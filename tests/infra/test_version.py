@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from ductor_bot.infra.version import (
     VersionInfo,
     _parse_version,
+    check_github_release,
     check_pypi,
     fetch_changelog,
     get_current_version,
@@ -30,6 +31,9 @@ class TestParseVersion:
 
     def test_non_numeric_suffix_stops(self) -> None:
         assert _parse_version("1.2.3a1") == (1, 2)
+
+    def test_v_prefixed_tag(self) -> None:
+        assert _parse_version("v0.19.0") == (0, 19, 0)
 
     def test_empty_string(self) -> None:
         assert _parse_version("") == ()
@@ -192,6 +196,153 @@ class TestCheckPypi:
         info = VersionInfo(current="1.0.0", latest="2.0.0", update_available=True, summary="test")
         assert info.current == "1.0.0"
         assert info.update_available is True
+
+
+class TestCheckGithubRelease:
+    """Test GitHub releases/tags update checking."""
+
+    async def test_returns_release_version_for_reductor_fork(self) -> None:
+        mock = _mock_pypi_session(
+            json_data=[
+                {
+                    "tag_name": "v0.19.0",
+                    "name": "v0.19.0",
+                    "body": "Release notes",
+                    "html_url": "https://github.com/CuasarN1/reductor/releases/tag/v0.19.0",
+                    "draft": False,
+                    "prerelease": False,
+                }
+            ]
+        )
+
+        with (
+            patch("ductor_bot.infra.version.get_current_version", return_value="0.18.12"),
+            patch("ductor_bot.infra.version.aiohttp.ClientSession", mock),
+        ):
+            result = await check_github_release(repo="CuasarN1/reductor")
+
+        assert result is not None
+        assert result.current == "0.18.12"
+        assert result.latest == "0.19.0"
+        assert result.update_available is True
+        assert result.source == "github"
+        assert result.source_repo == "CuasarN1/reductor"
+        assert result.release_url.endswith("/v0.19.0")
+
+    async def test_skips_prereleases_by_default(self) -> None:
+        mock = _mock_pypi_session(
+            json_data=[
+                {
+                    "tag_name": "v0.20.0-rc1",
+                    "draft": False,
+                    "prerelease": True,
+                }
+            ]
+        )
+
+        with patch("ductor_bot.infra.version.aiohttp.ClientSession", mock):
+            result = await check_github_release(repo="CuasarN1/reductor")
+
+        assert result is None
+
+    async def test_falls_back_to_tags_when_no_releases(self) -> None:
+        responses = [
+            (200, []),
+            (200, [{"name": "v0.19.0"}]),
+        ]
+        calls: list[str] = []
+
+        @asynccontextmanager
+        async def mock_get(url: str, **_kwargs: object) -> AsyncGenerator[MagicMock, None]:
+            calls.append(url)
+            status, data = responses.pop(0)
+            resp = MagicMock()
+            resp.status = status
+            resp.json = AsyncMock(return_value=data)
+            yield resp
+
+        session = MagicMock()
+        session.get = mock_get
+
+        @asynccontextmanager
+        async def mock_session_cm(**_kwargs: object) -> AsyncGenerator[MagicMock, None]:
+            yield session
+
+        with (
+            patch("ductor_bot.infra.version.get_current_version", return_value="0.18.12"),
+            patch("ductor_bot.infra.version.aiohttp.ClientSession", mock_session_cm),
+        ):
+            result = await check_github_release(repo="CuasarN1/reductor")
+
+        assert result is not None
+        assert result.latest == "0.19.0"
+        assert calls == [
+            "https://api.github.com/repos/CuasarN1/reductor/releases",
+            "https://api.github.com/repos/CuasarN1/reductor/tags",
+        ]
+
+    async def test_tags_skip_prereleases_by_default(self) -> None:
+        responses = [
+            (200, []),
+            (200, [{"name": "v0.20.0-rc1"}, {"name": "v0.19.0"}]),
+        ]
+
+        @asynccontextmanager
+        async def mock_get(*_args: object, **_kwargs: object) -> AsyncGenerator[MagicMock, None]:
+            status, data = responses.pop(0)
+            resp = MagicMock()
+            resp.status = status
+            resp.json = AsyncMock(return_value=data)
+            yield resp
+
+        session = MagicMock()
+        session.get = mock_get
+
+        @asynccontextmanager
+        async def mock_session_cm(**_kwargs: object) -> AsyncGenerator[MagicMock, None]:
+            yield session
+
+        with (
+            patch("ductor_bot.infra.version.get_current_version", return_value="0.18.12"),
+            patch("ductor_bot.infra.version.aiohttp.ClientSession", mock_session_cm),
+        ):
+            result = await check_github_release(repo="CuasarN1/reductor")
+
+        assert result is not None
+        assert result.latest == "0.19.0"
+
+    async def test_tags_can_include_prereleases_when_enabled(self) -> None:
+        responses = [
+            (200, []),
+            (200, [{"name": "v0.20.0-rc1"}, {"name": "v0.19.0"}]),
+        ]
+
+        @asynccontextmanager
+        async def mock_get(*_args: object, **_kwargs: object) -> AsyncGenerator[MagicMock, None]:
+            status, data = responses.pop(0)
+            resp = MagicMock()
+            resp.status = status
+            resp.json = AsyncMock(return_value=data)
+            yield resp
+
+        session = MagicMock()
+        session.get = mock_get
+
+        @asynccontextmanager
+        async def mock_session_cm(**_kwargs: object) -> AsyncGenerator[MagicMock, None]:
+            yield session
+
+        with (
+            patch("ductor_bot.infra.version.get_current_version", return_value="0.18.12"),
+            patch("ductor_bot.infra.version.aiohttp.ClientSession", mock_session_cm),
+        ):
+            result = await check_github_release(
+                repo="CuasarN1/reductor",
+                include_prereleases=True,
+            )
+
+        assert result is not None
+        assert result.latest == "0.20.0-rc1"
 
 
 class TestFetchChangelog:

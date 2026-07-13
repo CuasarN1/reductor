@@ -33,6 +33,7 @@ _OPTION_ALIASES = {
 }
 _POLICY_OPTION_KEYS = frozenset({"efforts", "efforts+", "models", "models+", "switch"})
 _USERNAME_PATTERN = r"@?[A-Za-z][A-Za-z0-9_]{4,31}"
+_TELEGRAM_REPLY_BODY_MARKERS = ("The user's message:", "Their reply is")
 
 
 async def cmd_access(orch: Orchestrator, key: SessionKey, text: str) -> OrchestratorResult:
@@ -731,13 +732,32 @@ def _contains_digit(text: str) -> bool:
 
 def is_access_config_change_request(text: str) -> bool:
     """Return True when text appears to request access allowlist changes."""
-    normalized = text.casefold()
+    normalized = _actual_reply_body(text).casefold()
     if _contains_any(normalized, ("allowed_user_ids", "allowed_group_ids")) and _contains_any(
         normalized,
         _CONFIG_KEY_CHANGE_TERMS,
     ):
         return True
     return _is_user_access_change_request(normalized) or _is_group_access_change_request(normalized)
+
+
+def _actual_reply_body(text: str) -> str:
+    """Strip Telegram reply citation wrappers before running access-change guards."""
+    lowered = text.casefold()
+    matches = [
+        (lowered.rfind(marker.casefold()), marker)
+        for marker in _TELEGRAM_REPLY_BODY_MARKERS
+    ]
+    index, marker = max(matches, key=lambda item: item[0])
+    if index < 0:
+        return text
+
+    start = index + len(marker)
+    if marker == "Their reply is":
+        line_end = text.find("\n", index)
+        if line_end >= 0:
+            start = line_end + 1
+    return text[start:].lstrip(" :\r\n\t")
 
 
 def _is_user_access_change_request(normalized: str) -> bool:

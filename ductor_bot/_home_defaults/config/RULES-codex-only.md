@@ -18,14 +18,12 @@ Edit only when the user asks for behavior changes.
 - `provider`: `codex`
 - `model`: default model id
   - Available models:
-    - `gpt-5.2-codex` - Frontier agentic coding model
-    - `gpt-5.3-codex` - Latest frontier agentic coding model
-    - `gpt-5.1-codex-max` - Codex-optimized for deep and fast reasoning
-    - `gpt-5.2` - Latest frontier model
-    - `gpt-5.1-codex-mini` - Cheaper, faster (limited reasoning)
+    - `gpt-5.5` - Newest/recommended frontier agentic coding model
+    - `gpt-5.4` - Frontier agentic coding model
+    - `gpt-5.4-mini` - Smaller, faster frontier coding model
+    - `gpt-5.3-codex-spark` - Codex-optimized coding model
 - `reasoning_effort`: `low|medium|high|xhigh` (Codex models)
-  - Most models support: `low`, `medium`, `high`, `xhigh`
-  - `gpt-5.1-codex-mini` only: `medium`, `high`
+  - Supported values: `low`, `medium`, `high`, `xhigh`
 - `permission_mode`: CLI permission behavior
 
 ### Time and Scheduling
@@ -64,6 +62,20 @@ For user-facing schedules, set `user_timezone` explicitly.
 - `cleanup.media_files_days`
 - `cleanup.output_to_user_days`
 - `cleanup.check_hour`
+
+### Update Notifications
+
+- `update_check`: master switch for background new-version checks.
+- `notifications.update_source`: `github` (default for ReDuctor fork releases) or `pypi`.
+- `notifications.update_github_repo`: GitHub `owner/repo` checked when source is `github`
+  (default `CuasarN1/reductor`).
+- `notifications.update_github_releases_url`: optional full GitHub API releases URL override.
+- `notifications.update_include_prereleases`: include GitHub prereleases when `true`.
+- `notifications.upgrade_targets`: optional chat/topic targets for update notifications.
+
+`/upgrade` still uses the Python package upgrade flow from PyPI; GitHub fork
+release notifications are informational unless your deployment process updates
+from the fork.
 
 ### File Sending Scope
 

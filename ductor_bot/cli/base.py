@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ductor_bot.cli.stream_events import StreamEvent
-from ductor_bot.cli.types import CLIResponse
+from ductor_bot.cli.types import CLIResponse, task_id_from_label
 
 if TYPE_CHECKING:
     from ductor_bot.cli.process_registry import ProcessRegistry
@@ -35,14 +35,9 @@ def _win_feed_stdin(process: asyncio.subprocess.Process, data: str) -> None:
 async def _feed_stdin_and_close(
     process: asyncio.subprocess.Process,
     data: str,
-    *,
-    windows_only: bool = False,
 ) -> None:
     """Write prompt to stdin and close the writer gracefully."""
-    if windows_only and not _IS_WINDOWS:
-        return
-
-    writer = process.stdin
+    writer = getattr(process, "stdin", None)
     if writer is None:
         return
 
@@ -145,6 +140,8 @@ def _docker_env_flags(
     ]
     if config.topic_id:
         env_flags += ["-e", f"DUCTOR_TOPIC_ID={config.topic_id}"]
+    if task_id := task_id_from_label(config.process_label):
+        env_flags += ["-e", f"DUCTOR_TASK_ID={task_id}"]
     if config.transcribe_command:
         env_flags += ["-e", f"DUCTOR_TRANSCRIBE_COMMAND={config.transcribe_command}"]
     if config.video_transcribe_command:

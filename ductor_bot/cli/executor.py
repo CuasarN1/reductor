@@ -16,11 +16,12 @@ from dataclasses import dataclass
 from ductor_bot.cli.base import (
     _IS_WINDOWS,
     CLIConfig,
+    _feed_stdin_and_close,
     _win_feed_stdin,
 )
 from ductor_bot.cli.stream_events import ResultEvent, StreamEvent
 from ductor_bot.cli.timeout_controller import TimeoutController
-from ductor_bot.cli.types import CLIResponse
+from ductor_bot.cli.types import CLIResponse, task_id_from_label
 from ductor_bot.infra.platform import CREATION_FLAGS as _CREATION_FLAGS
 from ductor_bot.infra.process_tree import force_kill_process_tree
 
@@ -58,6 +59,8 @@ def build_subprocess_env(config: CLIConfig) -> dict[str, str] | None:
     if config.topic_id:
         env["DUCTOR_TOPIC_ID"] = str(config.topic_id)
     env["DUCTOR_TRANSPORT"] = config.transport
+    if task_id := task_id_from_label(config.process_label):
+        env["DUCTOR_TASK_ID"] = task_id
     if config.transcribe_command:
         env["DUCTOR_TRANSCRIBE_COMMAND"] = config.transcribe_command
     if config.video_transcribe_command:
@@ -78,13 +81,14 @@ def build_subprocess_env(config: CLIConfig) -> dict[str, str] | None:
 
 @dataclass(slots=True)
 class SubprocessSpec:
-    """What to run: command, working directory, prompt, and timeout."""
+    """What to run: command, working directory, prompt, timeout, and stdin."""
 
     exec_cmd: list[str]
     use_cwd: str | None
     prompt: str
     timeout_seconds: float | None = None
     timeout_controller: TimeoutController | None = None
+    stdin_text: str | None = None
 
 
 @dataclass(slots=True)
@@ -132,7 +136,7 @@ async def run_streaming_subprocess(
 
     Lifecycle:
     1. Create subprocess with stdout/stderr pipes
-    2. Feed stdin on Windows (prompt via pipe)
+    2. Feed stdin when requested (or on Windows legacy prompt pipe)
     3. Register in process registry
     4. Drain stderr in background task
     5. Stream stdout lines through *line_handler* with timeout
@@ -143,7 +147,7 @@ async def run_streaming_subprocess(
     subprocess_env = build_subprocess_env(config) if spec.use_cwd else None
     process = await asyncio.create_subprocess_exec(
         *spec.exec_cmd,
-        stdin=_win_stdin_pipe(),
+        stdin=_stdin_pipe(spec),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=spec.use_cwd,
@@ -154,7 +158,10 @@ async def run_streaming_subprocess(
     if process.stdout is None or process.stderr is None:
         msg = "Subprocess created without stdout/stderr pipes"
         raise RuntimeError(msg)
-    _win_feed_stdin(process, spec.prompt)
+    # Feed stdin concurrently with the stdout read loop: a prompt larger than
+    # the OS pipe buffer (~64 KiB) would otherwise deadlock against a child
+    # that starts emitting stdout before draining stdin.
+    stdin_feed = asyncio.create_task(_feed_streaming_stdin(process, spec))
     logger.info("%s subprocess starting pid=%s", provider_label, process.pid)
 
     reg = config.process_registry
@@ -181,6 +188,10 @@ async def run_streaming_subprocess(
         )
         return
     finally:
+        if not stdin_feed.done():
+            stdin_feed.cancel()
+        with contextlib.suppress(BaseException):
+            await stdin_feed
         await _cancel_drain(stderr_drain)
         if tracked and reg:
             reg.unregister(tracked)
@@ -279,7 +290,7 @@ async def run_oneshot_subprocess(
 
     Lifecycle:
     1. Create subprocess with pipes
-    2. Communicate (stdin on Windows + wait)
+    2. Communicate (optional stdin + wait)
     3. Register/unregister in process registry
     4. Handle timeout
     5. Parse output via *parse_output* callback
@@ -287,7 +298,7 @@ async def run_oneshot_subprocess(
     oneshot_env = build_subprocess_env(config) if spec.use_cwd else None
     process = await asyncio.create_subprocess_exec(
         *spec.exec_cmd,
-        stdin=_win_stdin_pipe(),
+        stdin=_stdin_pipe(spec),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=spec.use_cwd,
@@ -303,7 +314,7 @@ async def run_oneshot_subprocess(
         else None
     )
     try:
-        stdin_data = spec.prompt.encode() if _IS_WINDOWS else None
+        stdin_data = _stdin_bytes(spec)
         if spec.timeout_controller:
             communicate_coro = process.communicate(input=stdin_data)
             stdout, stderr = await spec.timeout_controller.run_with_timeout(communicate_coro)
@@ -327,9 +338,27 @@ async def run_oneshot_subprocess(
 # ---------------------------------------------------------------------------
 
 
-def _win_stdin_pipe() -> int | None:
-    """Return ``asyncio.subprocess.PIPE`` on Windows, else ``None``."""
-    return asyncio.subprocess.PIPE if _IS_WINDOWS else None
+def _stdin_pipe(spec: SubprocessSpec) -> int | None:
+    """Return a stdin pipe when the provider supplies stdin or Windows needs it."""
+    return asyncio.subprocess.PIPE if spec.stdin_text is not None or _IS_WINDOWS else None
+
+
+def _stdin_bytes(spec: SubprocessSpec) -> bytes | None:
+    """Return bytes to feed to communicate(), preserving Windows legacy behavior."""
+    if spec.stdin_text is not None:
+        return spec.stdin_text.encode()
+    return spec.prompt.encode() if _IS_WINDOWS else None
+
+
+async def _feed_streaming_stdin(
+    process: asyncio.subprocess.Process,
+    spec: SubprocessSpec,
+) -> None:
+    """Feed stdin for streaming processes, using the old Windows fallback when needed."""
+    if spec.stdin_text is not None:
+        await _feed_stdin_and_close(process, spec.stdin_text)
+        return
+    _win_feed_stdin(process, spec.prompt)
 
 
 async def _cancel_drain(drain: asyncio.Task[bytes]) -> None:

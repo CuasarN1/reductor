@@ -332,7 +332,7 @@ async def test_callback_provider_antigravity(orch: Orchestrator) -> None:
 
 
 async def test_callback_model_claude_switches(orch: Orchestrator) -> None:
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     resp = await handle_model_callback(orch, SessionKey(chat_id=1), "ms:m:sonnet")
     assert "sonnet" in resp.text
     assert resp.buttons is None
@@ -342,7 +342,7 @@ async def test_callback_model_claude_switches(orch: Orchestrator) -> None:
 async def test_callback_model_antigravity_switches_without_reasoning_step(
     orch: Orchestrator,
 ) -> None:
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     resp = await handle_model_callback(orch, SessionKey(chat_id=1), "ms:m:antigravity-default")
     assert "antigravity-default" in resp.text
     assert "Thinking level" not in resp.text
@@ -400,7 +400,7 @@ async def test_callback_model_codex_filters_reasoning_by_user_policy(orch: Orche
 
 
 async def test_callback_reasoning_switches(orch: Orchestrator) -> None:
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     resp = await handle_model_callback(orch, SessionKey(chat_id=1), "ms:r:high:gpt-5.2-codex")
     assert "gpt-5.2-codex" in resp.text
     assert "high" in resp.text.lower()
@@ -431,7 +431,7 @@ async def test_callback_back_provider(orch: Orchestrator) -> None:
 async def test_switch_model_basic(orch: Orchestrator) -> None:
     mock_kill = AsyncMock(return_value=0)
     mock_reset = AsyncMock()
-    object.__setattr__(orch._process_registry, "kill_all", mock_kill)
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", mock_kill)
     object.__setattr__(orch._sessions, "reset_provider_session", mock_reset)
     result = await switch_model(orch, SessionKey(chat_id=1), "sonnet")
     assert "opus" in result
@@ -439,13 +439,13 @@ async def test_switch_model_basic(orch: Orchestrator) -> None:
     assert "Session reset" not in result
     assert "Resuming session" not in result
     assert orch._config.model == "sonnet"
-    mock_kill.assert_called_once_with(1)
+    mock_kill.assert_called_once_with(1, None)
     mock_reset.assert_not_called()
 
 
 async def test_switch_model_opus_1m_persists(orch: Orchestrator) -> None:
     """opus[1m] is a valid Claude alias; switch_model persists it to config (#76)."""
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     result = await switch_model(orch, SessionKey(chat_id=1), "opus[1m]")
     assert "opus[1m]" in result
     assert orch._config.model == "opus[1m]"
@@ -460,7 +460,7 @@ async def test_switch_model_already_set(orch: Orchestrator) -> None:
 
 
 async def test_switch_model_with_reasoning_effort(orch: Orchestrator) -> None:
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     result = await switch_model(orch, SessionKey(chat_id=1), "sonnet", reasoning_effort="high")
     assert "high" in result.lower()
     assert orch._config.reasoning_effort == "high"
@@ -469,7 +469,7 @@ async def test_switch_model_with_reasoning_effort(orch: Orchestrator) -> None:
 
 
 async def test_switch_model_persists_to_config(orch: Orchestrator) -> None:
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     await switch_model(orch, SessionKey(chat_id=1), "sonnet")
     saved = json.loads(orch.paths.config_path.read_text(encoding="utf-8"))
     assert saved["model"] == "sonnet"
@@ -477,7 +477,7 @@ async def test_switch_model_persists_to_config(orch: Orchestrator) -> None:
 
 async def test_switch_model_provider_change(orch: Orchestrator) -> None:
     mock_reset = AsyncMock()
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     object.__setattr__(orch._sessions, "reset_provider_session", mock_reset)
     result = await switch_model(orch, SessionKey(chat_id=1), "o3")
     assert "Provider:" in result
@@ -492,7 +492,7 @@ async def test_switch_model_shows_resume_hint_same_provider(orch: Orchestrator) 
     session.session_id = "claude-abc123"
     await orch._sessions.update_session(session)
 
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     result = await switch_model(orch, SessionKey(chat_id=1), "sonnet")
 
     assert "Resuming session `claude-abc123`." in result
@@ -508,7 +508,7 @@ async def test_switch_model_shows_resume_hint_provider_change(orch: Orchestrator
     session.session_id = "codex-xyz789"
     await orch._sessions.update_session(session)
 
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     result = await switch_model(orch, SessionKey(chat_id=1), "o3")
 
     assert "Resuming session `codex-xyz789`." in result
@@ -521,7 +521,7 @@ async def test_switch_reasoning_only(orch: Orchestrator) -> None:
     """Changing only reasoning effort does not reset session."""
     mock_kill = AsyncMock(return_value=0)
     mock_reset = AsyncMock()
-    object.__setattr__(orch._process_registry, "kill_all", mock_kill)
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", mock_kill)
     object.__setattr__(orch._sessions, "reset_provider_session", mock_reset)
     result = await switch_model(orch, SessionKey(chat_id=1), "opus", reasoning_effort="high")
     assert "Reasoning effort updated" in result
@@ -535,7 +535,7 @@ async def test_switch_model_rejects_invalid_codex_reasoning_effort(orch: Orchest
     from ductor_bot.cli.codex_cache import CodexModelCache
     from ductor_bot.cli.codex_discovery import CodexModelInfo
 
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     orch._observers.codex_cache_obs = MagicMock(
         get_cache=MagicMock(
             return_value=CodexModelCache(

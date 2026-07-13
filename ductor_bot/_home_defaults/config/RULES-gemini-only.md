@@ -20,10 +20,10 @@ Edit only when the user asks for behavior changes.
   - Available:
     - `gemini-2.5-pro` - Balanced, most capable (recommended)
     - `gemini-2.5-flash` - Fast and cost-effective
-    - `gemini-2.5-flash-lite` - Cheapest, fastest
     - `gemini-3-pro-preview` - Next-gen preview
-    - `gemini-3-flash-preview` - Next-gen fast preview
-    - `gemini-3.1-pro-preview` - Latest preview
+    - `gemini-3.1-pro-preview` - Latest pro preview
+    - `gemini-3.1-flash-lite` - Lightweight fast preview
+    - `gemini-3.5-flash` - Latest fast model
 - `permission_mode`: CLI permission behavior
 
 ### Time and Scheduling
@@ -62,6 +62,20 @@ For user-facing schedules, set `user_timezone` explicitly.
 - `cleanup.media_files_days`
 - `cleanup.output_to_user_days`
 - `cleanup.check_hour`
+
+### Update Notifications
+
+- `update_check`: master switch for background new-version checks.
+- `notifications.update_source`: `github` (default for ReDuctor fork releases) or `pypi`.
+- `notifications.update_github_repo`: GitHub `owner/repo` checked when source is `github`
+  (default `CuasarN1/reductor`).
+- `notifications.update_github_releases_url`: optional full GitHub API releases URL override.
+- `notifications.update_include_prereleases`: include GitHub prereleases when `true`.
+- `notifications.upgrade_targets`: optional chat/topic targets for update notifications.
+
+`/upgrade` still uses the Python package upgrade flow from PyPI; GitHub fork
+release notifications are informational unless your deployment process updates
+from the fork.
 
 ### File Sending Scope
 

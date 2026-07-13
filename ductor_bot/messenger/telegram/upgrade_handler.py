@@ -26,27 +26,46 @@ async def on_update_available(bot: TelegramBot, info: VersionInfo) -> None:
     """Notify all users about a new version via Telegram."""
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=t("upgrade_handler.btn_changelog", version=info.latest),
-                    callback_data=f"upg:cl:{info.latest}",
-                ),
+    if info.source == "github":
+        rows = []
+        if info.release_url:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=t("upgrade_handler.btn_changelog", version=info.latest),
+                        url=info.release_url,
+                    )
+                ]
+            )
+        keyboard = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
+        source_line = f"\nSource: `{info.source_repo}`" if info.source_repo else ""
+        action_line = "\nUpdate from the configured fork release source; `/upgrade` still checks PyPI."
+    else:
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text=t("upgrade_handler.btn_changelog", version=info.latest),
+                        callback_data=f"upg:cl:{info.latest}",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        text=t("upgrade_handler.btn_upgrade_now"),
+                        callback_data=f"upg:yes:{info.latest}",
+                    ),
+                    InlineKeyboardButton(
+                        text=t("upgrade_handler.btn_later"), callback_data="upg:no"
+                    ),
+                ],
             ],
-            [
-                InlineKeyboardButton(
-                    text=t("upgrade_handler.btn_upgrade_now"),
-                    callback_data=f"upg:yes:{info.latest}",
-                ),
-                InlineKeyboardButton(text=t("upgrade_handler.btn_later"), callback_data="upg:no"),
-            ],
-        ],
-    )
+        )
+        source_line = ""
+        action_line = ""
     text = fmt(
         t("upgrade.available_header"),
         SEP,
-        f"Installed: `{info.current}`\nNew:       `{info.latest}`",
+        f"Installed: `{info.current}`\nNew:       `{info.latest}`{source_line}{action_line}",
     )
     await bot.notify_upgrade(text, SendRichOpts(reply_markup=keyboard))
 

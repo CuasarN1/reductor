@@ -350,7 +350,7 @@ async def switch_model(  # noqa: C901, PLR0912
     *,
     reasoning_effort: str | None = None,
 ) -> str:
-    """Execute model switch: kill processes, preserve sessions, persist config.
+    """Execute model switch: kill topic processes, preserve sessions, persist config.
 
     Shared by ``/model <name>`` text command and the wizard callbacks.
     """
@@ -391,7 +391,7 @@ async def switch_model(  # noqa: C901, PLR0912
     )
 
     if not same_model:
-        await orch._process_registry.kill_all(key.chat_id)
+        await orch._process_registry.kill_by_chat_topic(key.chat_id, key.topic_id)
         if active_session is not None:
             await orch._sessions.sync_session_target(
                 active_session,

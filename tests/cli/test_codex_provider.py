@@ -40,7 +40,6 @@ def _default_non_windows_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep platform-sensitive command tests stable on Windows hosts."""
     monkeypatch.setattr("ductor_bot.cli.base._IS_WINDOWS", False)
     monkeypatch.setattr("ductor_bot.cli.executor._IS_WINDOWS", False)
-    monkeypatch.setattr("ductor_bot.cli.codex_provider._IS_WINDOWS", False)
 
 
 def _make_cli(monkeypatch: pytest.MonkeyPatch, **overrides: Any) -> CodexCLI:
@@ -93,6 +92,9 @@ def _make_streaming_process(
     stderr_mock = AsyncMock()
     stderr_mock.read = AsyncMock(return_value=stderr)
     proc.stderr = stderr_mock
+    proc.stdin = MagicMock()
+    proc.stdin.drain = MagicMock(return_value=None)
+    proc.stdin.close = MagicMock()
 
     return proc
 
@@ -201,7 +203,8 @@ class TestBuildCommand:
         assert "--model" in cmd
         idx_model = cmd.index("--model")
         assert cmd[idx_model + 1] == "gpt-5.2-codex"
-        assert cmd[-1] == "hello"
+        assert cmd[-2:] == ["--", "-"]
+        assert "hello" not in cmd
 
     def test_json_output_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
         cli = _make_cli(monkeypatch)
@@ -213,9 +216,8 @@ class TestBuildCommand:
         cmd = cli._build_command("hello")
         assert "--model" not in cmd
 
-    def test_windows_exec_uses_dash_prompt_marker(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Windows sends prompts via stdin without Codex's stdout stdin notice."""
-        monkeypatch.setattr("ductor_bot.cli.codex_provider._IS_WINDOWS", True)
+    def test_exec_uses_dash_prompt_marker(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Codex reads prompts via stdin to avoid argv size limits."""
         cli = _make_cli(monkeypatch)
 
         cmd = cli._build_command("hello")
@@ -223,9 +225,8 @@ class TestBuildCommand:
         assert cmd[-2:] == ["--", "-"]
         assert "hello" not in cmd
 
-    def test_windows_resume_uses_dash_prompt_marker(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Resume on Windows must explicitly read the prompt from stdin."""
-        monkeypatch.setattr("ductor_bot.cli.codex_provider._IS_WINDOWS", True)
+    def test_resume_uses_dash_prompt_marker(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Resume must explicitly read the prompt from stdin."""
         cli = _make_cli(monkeypatch)
 
         cmd = cli._build_command("hello", resume_session="thread-abc")
@@ -283,11 +284,23 @@ class TestBuildCommand:
         assert cmd[2] == "resume"
         assert "--json" in cmd
         assert "--dangerously-bypass-approvals-and-sandbox" in cmd
-        assert "thread-abc" in cmd
-        # resume does not include --model, --color, --skip-git-repo-check
-        assert "--model" not in cmd
+        idx_model = cmd.index("--model")
+        assert cmd[idx_model + 1] == "gpt-5.2-codex"
+        idx_separator = cmd.index("--")
+        assert idx_model < idx_separator
+        assert cmd[idx_separator + 1] == "thread-abc"
+        assert cmd[-1] == "-"  # prompt arrives via stdin (#137)
         assert "--color" not in cmd
         assert "--skip-git-repo-check" not in cmd
+
+    @pytest.mark.parametrize("model", [None, ""])
+    def test_resume_session_no_model_omits_flag(
+        self, monkeypatch: pytest.MonkeyPatch, model: str | None
+    ) -> None:
+        cli = _make_cli(monkeypatch, model=model)
+        cmd = cli._build_command("hello", resume_session="thread-abc")
+        assert "--model" not in cmd
+        assert cmd[-3:] == ["--", "thread-abc", "-"]  # prompt arrives via stdin (#137)
 
     def test_resume_session_json_output_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
         cli = _make_cli(monkeypatch)
@@ -298,17 +311,17 @@ class TestBuildCommand:
     def test_prompt_composed_in_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
         cli = _make_cli(monkeypatch, system_prompt="SYS", append_system_prompt="APPEND")
         cmd = cli._build_command("user msg")
-        final_arg = cmd[-1]
-        assert "SYS" in final_arg
-        assert "user msg" in final_arg
-        assert "APPEND" in final_arg
+        assert cmd[-2:] == ["--", "-"]
+        assert "SYS" not in cmd
+        assert "user msg" not in cmd
+        assert "APPEND" not in cmd
 
     def test_resume_prompt_also_composed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         cli = _make_cli(monkeypatch, system_prompt="SYS")
         cmd = cli._build_command("user msg", resume_session="th-1")
-        final_arg = cmd[-1]
-        assert "SYS" in final_arg
-        assert "user msg" in final_arg
+        assert cmd[-3:] == ["--", "th-1", "-"]
+        assert "SYS" not in cmd
+        assert "user msg" not in cmd
 
 
 # ---------------------------------------------------------------------------
@@ -597,6 +610,56 @@ class TestSend:
 
         assert "Resumed" in resp.result
 
+    async def test_send_passes_composed_prompt_via_stdin(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cli = _make_cli(monkeypatch, system_prompt="SYS", append_system_prompt="APPEND")
+        jsonl = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"type": "agent_message", "text": "OK"},
+            }
+        )
+        proc = _make_process_mock(stdout=jsonl.encode(), returncode=0)
+
+        with patch("ductor_bot.cli.executor.asyncio") as mock_asyncio:
+            mock_asyncio.timeout = asyncio.timeout
+            mock_asyncio.subprocess = asyncio.subprocess
+            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=proc)
+
+            await cli.send("hello")
+
+        call_args = mock_asyncio.create_subprocess_exec.call_args
+        assert call_args.args[-2:] == ("--", "-")
+        assert "hello" not in call_args.args
+        assert call_args.kwargs["stdin"] == asyncio.subprocess.PIPE
+        proc.communicate.assert_awaited_once_with(input=b"SYS\n\nhello\n\nAPPEND")
+
+    async def test_send_resume_passes_composed_prompt_via_stdin(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cli = _make_cli(monkeypatch, system_prompt="SYS")
+        jsonl = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"type": "agent_message", "text": "OK"},
+            }
+        )
+        proc = _make_process_mock(stdout=jsonl.encode(), returncode=0)
+
+        with patch("ductor_bot.cli.executor.asyncio") as mock_asyncio:
+            mock_asyncio.timeout = asyncio.timeout
+            mock_asyncio.subprocess = asyncio.subprocess
+            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=proc)
+
+            await cli.send("hello", resume_session="thread-xyz")
+
+        call_args = mock_asyncio.create_subprocess_exec.call_args
+        assert call_args.args[-3:] == ("--", "thread-xyz", "-")
+        assert "hello" not in call_args.args
+        assert call_args.kwargs["stdin"] == asyncio.subprocess.PIPE
+        proc.communicate.assert_awaited_once_with(input=b"SYS\n\nhello")
+
     async def test_send_registry_unregisters_on_timeout(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -625,6 +688,40 @@ class TestSend:
 
 
 class TestSendStreaming:
+    async def test_streaming_passes_composed_prompt_via_stdin(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cli = _make_cli(monkeypatch, system_prompt="SYS")
+        proc = _make_streaming_process(
+            [
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {"type": "agent_message", "text": "OK"},
+                    }
+                )
+            ],
+            returncode=0,
+        )
+        proc.stdin = MagicMock()
+        proc.stdin.drain = MagicMock(return_value=None)
+        proc.stdin.close = MagicMock()
+
+        with patch("ductor_bot.cli.executor.asyncio") as mock_asyncio:
+            mock_asyncio.timeout = asyncio.timeout
+            mock_asyncio.subprocess = asyncio.subprocess
+            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=proc)
+            mock_asyncio.create_task = asyncio.ensure_future
+
+            await _collect_events(cli.send_streaming("hello"))
+
+        call_args = mock_asyncio.create_subprocess_exec.call_args
+        assert call_args.args[-2:] == ("--", "-")
+        assert "hello" not in call_args.args
+        assert call_args.kwargs["stdin"] == asyncio.subprocess.PIPE
+        proc.stdin.write.assert_called_once_with(b"SYS\n\nhello")
+        proc.stdin.close.assert_called_once()
+
     async def test_streaming_full_sequence(self, monkeypatch: pytest.MonkeyPatch) -> None:
         cli = _make_cli(monkeypatch)
         lines = [
@@ -1216,11 +1313,10 @@ class TestDockerIntegration:
         assert call_args.kwargs.get("cwd") is None
         assert resp.result == "docker OK"
 
-    async def test_send_with_docker_container_keeps_stdin_open_on_windows(
+    async def test_send_with_docker_container_keeps_stdin_open(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Windows Codex-in-Docker must use ``docker exec -i`` so stdin prompts arrive."""
-        monkeypatch.setattr("ductor_bot.cli.codex_provider._IS_WINDOWS", True)
+        """Dockerized Codex must use ``docker exec -i`` so stdin prompts arrive."""
         cli = CodexCLI(
             CLIConfig(
                 provider="codex",
@@ -1357,12 +1453,13 @@ class TestSendWithoutRegistry:
 
 class TestResumeCommandArgOrder:
     def test_resume_session_id_before_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The resume command must have: ... thread_id prompt (in that order)."""
+        """The resume command must have: ... thread_id - (stdin marker)."""
         cli = _make_cli(monkeypatch, system_prompt=None, append_system_prompt=None)
         cmd = cli._build_command("my prompt", resume_session="th-abc")
-        # thread_id and prompt should be the last two args
+        # thread_id and stdin marker should be the last two args
         assert cmd[-2] == "th-abc"
-        assert cmd[-1] == "my prompt"
+        assert cmd[-1] == "-"
+        assert "my prompt" not in cmd
 
     def test_resume_with_empty_images_no_crash(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Resume path ignores images even if set (they're not in the resume branch)."""

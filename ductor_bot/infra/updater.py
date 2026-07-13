@@ -10,9 +10,13 @@ import os
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ductor_bot.infra.platform import CREATION_FLAGS as _CREATION_FLAGS
-from ductor_bot.infra.version import VersionInfo, _parse_version, check_pypi
+from ductor_bot.infra.version import VersionInfo, _parse_version, check_github_release, check_pypi
+
+if TYPE_CHECKING:
+    from ductor_bot.config import AgentConfig
 
 logger = logging.getLogger(__name__)
 
@@ -21,15 +25,45 @@ _INITIAL_DELAY_S = 60  # 1 minute after startup
 _VERIFY_DELAYS_S: tuple[float, ...] = (0.15, 0.35, 0.75, 1.5)
 
 VersionCallback = Callable[[VersionInfo], Awaitable[None]]
+VersionChecker = Callable[[], Awaitable[VersionInfo | None]]
 
 _UPGRADE_SENTINEL_NAME = "upgrade-sentinel.json"
 
 
-class UpdateObserver:
-    """Background task that checks PyPI for new versions periodically."""
+def make_update_checker(config: AgentConfig) -> VersionChecker:
+    """Build the configured version checker for background update notifications."""
+    notifications = config.notifications
+    source = notifications.update_source.strip().lower()
+    if source in {"github", "github_release", "github_releases", "release", "releases", "tags"}:
 
-    def __init__(self, *, notify: VersionCallback) -> None:
+        async def _check_github() -> VersionInfo | None:
+            return await check_github_release(
+                repo=notifications.update_github_repo,
+                releases_url=notifications.update_github_releases_url,
+                include_prereleases=notifications.update_include_prereleases,
+            )
+
+        return _check_github
+
+    if source in {"pypi", "package"}:
+        async def _check_pypi() -> VersionInfo | None:
+            return await check_pypi()
+
+        return _check_pypi
+
+    async def _disabled() -> VersionInfo | None:
+        logger.info("Update checks disabled by notifications.update_source=%r", source)
+        return None
+
+    return _disabled
+
+
+class UpdateObserver:
+    """Background task that checks the configured release source periodically."""
+
+    def __init__(self, *, notify: VersionCallback, check: VersionChecker | None = None) -> None:
         self._notify = notify
+        self._check = check or _default_pypi_checker
         self._task: asyncio.Task[None] | None = None
         self._last_notified: str = ""
 
@@ -46,13 +80,17 @@ class UpdateObserver:
         await asyncio.sleep(_INITIAL_DELAY_S)
         while True:
             try:
-                info = await check_pypi()
+                info = await self._check()
                 if info and info.update_available and info.latest != self._last_notified:
                     self._last_notified = info.latest
                     await self._notify(info)
             except Exception:
                 logger.debug("Update check failed", exc_info=True)
             await asyncio.sleep(_CHECK_INTERVAL_S)
+
+
+async def _default_pypi_checker() -> VersionInfo | None:
+    return await check_pypi()
 
 
 # ---------------------------------------------------------------------------

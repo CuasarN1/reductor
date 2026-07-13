@@ -343,6 +343,10 @@ class NotificationsConfig(BaseModel):
 
     startup_targets: list[NotificationTarget] = Field(default_factory=list)
     upgrade_targets: list[NotificationTarget] = Field(default_factory=list)
+    update_source: str = "github"
+    update_github_repo: str = "CuasarN1/reductor"
+    update_github_releases_url: str = ""
+    update_include_prereleases: bool = False
 
 
 class SceneConfig(BaseModel):

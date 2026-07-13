@@ -55,15 +55,21 @@ async def run_matrix_startup(bot: MatrixBot) -> None:
         # Update checker
         try:
             from ductor_bot.infra.install import is_upgradeable
-            from ductor_bot.infra.updater import UpdateObserver
+            from ductor_bot.infra.updater import UpdateObserver, make_update_checker
             from ductor_bot.infra.version import VersionInfo
 
             if is_upgradeable() and bot._config.update_check and bot._agent_name == "main":
 
                 async def _on_update(info: VersionInfo) -> None:
-                    await bot.notify_upgrade(t("startup.matrix_update", version=info.latest))
+                    text = t("startup.matrix_update", version=info.latest)
+                    if info.source == "github" and info.source_repo:
+                        text += f"\nSource: `{info.source_repo}`"
+                    await bot.notify_upgrade(text)
 
-                bot._update_observer = UpdateObserver(notify=_on_update)
+                bot._update_observer = UpdateObserver(
+                    notify=_on_update,
+                    check=make_update_checker(bot._config),
+                )
                 bot._update_observer.start()
         except ImportError:
             pass
