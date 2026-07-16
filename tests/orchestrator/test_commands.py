@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from ductor_bot.cli.auth import AuthResult, AuthStatus
 from ductor_bot.orchestrator.commands import (
@@ -239,10 +239,34 @@ async def test_diagnose_shows_effective_runtime_target(orch: Orchestrator) -> No
 
 
 async def test_model_unknown_name(orch: Orchestrator) -> None:
-    """Unknown model names are treated as codex models and the switch succeeds."""
+    """Unknown Codex model names are rejected when the Codex cache is loaded."""
+    from datetime import UTC, datetime
+
+    from ductor_bot.cli.codex_cache import CodexModelCache
+    from ductor_bot.cli.codex_discovery import CodexModelInfo
+
     object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
+    orch._observers.codex_cache_obs = MagicMock(
+        get_cache=MagicMock(
+            return_value=CodexModelCache(
+                last_updated=datetime.now(UTC).isoformat(),
+                models=[
+                    CodexModelInfo(
+                        id="gpt-5.6",
+                        display_name="GPT-5.6",
+                        description="Newest",
+                        supported_efforts=("low", "medium", "high", "xhigh"),
+                        default_effort="medium",
+                        is_default=True,
+                    )
+                ],
+            )
+        )
+    )
+
     result = await cmd_model(orch, SessionKey(chat_id=1), "/model totally_fake_model")
-    assert "Model switched" in result.text
+    assert "not returned by local Codex CLI discovery" in result.text
     assert "totally_fake_model" in result.text
-    assert orch._config.model == "totally_fake_model"
-    assert orch._config.provider == "codex"
+    assert "gpt-5.6" in result.text
+    assert orch._config.model == "opus"
+    assert orch._config.provider == "claude"

@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.19.1 - 2026-07-16
+
+### Added
+
+- Added GPT-5.6 as the newest/recommended Codex fallback model for new or
+  discovery-fallback installs.
+- Added `/diagnose` visibility for the installed Codex CLI version.
+- Added `/diagnose` warning when local Codex model discovery does not expose
+  GPT-5.6, with guidance to update Codex CLI and restart ReDuctor or wait for
+  account rollout.
+
+### Changed
+
+- Direct `/model <codex-id>` now rejects unknown Codex model IDs when the
+  local Codex model cache is loaded, instead of silently switching to a model
+  the local CLI may not be able to run.
+- Cron/webhook model validation now explains that an unknown Codex model was
+  not returned by local Codex CLI discovery and lists available models.
+- Refreshed bundled config, cron, webhook, and agent tool rules to list
+  GPT-5.6 before GPT-5.5.
+
+### Upgrade Notes
+
+GPT-5.6 availability depends on the user's installed Codex CLI and OpenAI
+account rollout. After upgrading ReDuctor, users should update Codex CLI and
+restart the bot so `codex app-server` model discovery is refreshed.
+
 ## v0.19.0 - 2026-07-13
 
 ReDuctor 0.19.0 backports the most relevant Ductor 0.19 runtime fixes while

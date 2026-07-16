@@ -11,12 +11,20 @@ from ductor_bot.cli.model_cache import BaseModelCache
 # Hardcoded fallback when discovery and disk cache both fail.
 _FALLBACK_CODEX_MODELS: tuple[CodexModelInfo, ...] = (
     CodexModelInfo(
+        id="gpt-5.6",
+        display_name="GPT-5.6",
+        description="Newest recommended frontier agentic coding model.",
+        supported_efforts=("low", "medium", "high", "xhigh"),
+        default_effort="medium",
+        is_default=True,
+    ),
+    CodexModelInfo(
         id="gpt-5.5",
         display_name="GPT-5.5",
         description="Frontier model for complex coding, research, and real-world work.",
         supported_efforts=("low", "medium", "high", "xhigh"),
         default_effort="medium",
-        is_default=True,
+        is_default=False,
     ),
     CodexModelInfo(
         id="gpt-5.4",

@@ -18,7 +18,8 @@ Edit only when the user asks for behavior changes.
 - `provider`: `codex`
 - `model`: default model id
   - Available models:
-    - `gpt-5.5` - Newest/recommended frontier agentic coding model
+    - `gpt-5.6` - Newest/recommended frontier agentic coding model
+    - `gpt-5.5` - Frontier agentic coding model
     - `gpt-5.4` - Frontier agentic coding model
     - `gpt-5.4-mini` - Smaller, faster frontier coding model
     - `gpt-5.3-codex-spark` - Codex-optimized coding model

@@ -13,7 +13,7 @@ Scripts for managing incoming HTTP webhook endpoints.
 
 2. **Which model?**
    - **If Claude:** `haiku`, `sonnet` (recommended), `sonnet[1m]`, `opus`, `opus[1m]`, `fable`
-   - **If Codex:** `gpt-5.5` (recommended), `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`
+   - **If Codex:** `gpt-5.6` (recommended), `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`
    - **If Gemini:** `gemini-2.5-pro` (recommended), `gemini-2.5-flash`, `gemini-3-pro-preview`, `gemini-3.1-pro-preview`, `gemini-3.1-flash-lite`, `gemini-3.5-flash`
 
 3. **If Codex: Which thinking level?**
@@ -129,7 +129,7 @@ python3 tools/webhook_tools/webhook_add.py \
   --mode "cron_task" --task-folder "github-review" \
   --prompt-template "Review PR #{{number}}: {{title}}" \
   --provider codex \
-  --model gpt-5.5 \
+  --model gpt-5.6 \
   --reasoning-effort high
 
 # cron_task mode - Gemini example
@@ -249,7 +249,8 @@ Webhooks in `cron_task` mode can override global config settings in `webhooks.js
 - `model`: Model name (optional, defaults to global config)
   - Claude models: `"haiku"`, `"sonnet"`, `"sonnet[1m]"`, `"opus"`, `"opus[1m]"`, `"fable"`
   - Codex models:
-    - `"gpt-5.5"` - Newest/recommended frontier agentic coding model
+    - `"gpt-5.6"` - Newest/recommended frontier agentic coding model
+    - `"gpt-5.5"` - Frontier agentic coding model
     - `"gpt-5.4"` - Frontier agentic coding model
     - `"gpt-5.4-mini"` - Smaller, faster frontier coding model
     - `"gpt-5.3-codex-spark"` - Codex-optimized coding model
@@ -291,7 +292,7 @@ Codex webhook:
   "task_folder": "data-analysis",
   "prompt_template": "Analyze data: {{summary}}",
   "provider": "codex",
-  "model": "gpt-5.5",
+  "model": "gpt-5.6",
   "reasoning_effort": "high"
 }
 ```

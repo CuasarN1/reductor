@@ -115,7 +115,12 @@ def resolve_cli_config(
             msg = "Codex cache is required for Codex model validation"
             raise DuctorError(msg)
         if not codex_cache.validate_model(model):
-            msg = f"Invalid Codex model: {model}"
+            available = ", ".join(m.id for m in codex_cache.models) or "none"
+            msg = (
+                f"Invalid Codex model: {model}. It was not returned by local Codex CLI "
+                "model discovery. Update Codex CLI and restart Ductor, or wait for "
+                f"account rollout. Available Codex models: {available}"
+            )
             raise DuctorError(msg)
 
     # 4. Resolve reasoning effort (Codex only)

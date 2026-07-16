@@ -130,7 +130,7 @@ def test_resolve_invalid_codex_model(
         model="nonexistent-model",
     )
 
-    with pytest.raises(DuctorError, match="Invalid Codex model"):
+    with pytest.raises(DuctorError, match="Update Codex CLI and restart Ductor"):
         resolve_cli_config(base_config, codex_cache, task_overrides=overrides)
 
 

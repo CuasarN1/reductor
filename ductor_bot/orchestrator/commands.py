@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from pathlib import Path
+from shutil import which
 from typing import TYPE_CHECKING
 
 from ductor_bot.cli.auth import check_all_auth
@@ -195,12 +197,44 @@ def _build_codex_cache_block(orch: Orchestrator) -> str:
     if not cache or not cache.models:
         return "\n🔄 " + t("diagnose.codex_cache_not_loaded")
     default_model = next((m.id for m in cache.models if m.is_default), "N/A")
-    return "\n🔄 " + t(
-        "diagnose.codex_cache_info",
-        updated=cache.last_updated,
-        count=len(cache.models),
-        default=default_model,
-    )
+    lines = [
+        t(
+            "diagnose.codex_cache_info",
+            updated=cache.last_updated,
+            count=len(cache.models),
+            default=default_model,
+        )
+    ]
+    if not cache.validate_model("gpt-5.6"):
+        lines.append(t("diagnose.codex_gpt56_missing"))
+    return "\n🔄 " + "\n".join(lines)
+
+
+async def _read_codex_cli_version() -> str:
+    """Return a short Codex CLI version string for diagnostics."""
+    codex_path = which("codex")
+    if not codex_path:
+        return t("diagnose.codex_cli_not_found")
+
+    proc: asyncio.subprocess.Process | None = None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            codex_path,
+            "--version",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=3.0)
+    except (OSError, TimeoutError):
+        if proc is not None:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(proc.wait(), timeout=0.2)
+        return t("diagnose.codex_cli_unknown")
+
+    raw = (stdout or stderr).decode(errors="replace").strip()
+    return raw.splitlines()[0] if raw else t("diagnose.codex_cli_unknown")
 
 
 def _build_diagnose_health_block(orch: Orchestrator) -> str:
@@ -243,9 +277,11 @@ async def cmd_diagnose(orch: Orchestrator, _key: SessionKey, _text: str) -> Orch
     """Handle /diagnose."""
     logger.info("Diagnose requested")
     version = get_current_version()
+    codex_cli_version = await _read_codex_cli_version()
     effective_model, effective_provider = orch.resolve_runtime_target(orch._config.model)
     info_block = (
         f"{t('diagnose.version_line', version=version)}\n"
+        f"{t('diagnose.codex_cli_line', version=codex_cli_version)}\n"
         f"{t('diagnose.configured_line', provider=orch._config.provider, model=orch._config.model)}\n"
         f"{t('diagnose.effective_line', provider=effective_provider, model=effective_model)}"
     )

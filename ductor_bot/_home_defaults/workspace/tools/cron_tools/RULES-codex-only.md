@@ -7,7 +7,8 @@ Scripts for creating, editing, listing, and removing scheduled jobs.
 **When the user requests a new cron job, you MUST ask:**
 
 1. **Which model?**
-   - `gpt-5.5` - Newest/recommended frontier agentic coding model
+   - `gpt-5.6` - Newest/recommended frontier agentic coding model
+   - `gpt-5.5` - Frontier agentic coding model
    - `gpt-5.4` - Frontier agentic coding model
    - `gpt-5.4-mini` - Smaller, faster frontier coding model
    - `gpt-5.3-codex-spark` - Codex-optimized coding model

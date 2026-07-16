@@ -140,6 +140,24 @@ def _validate_codex_reasoning_effort(
     )
 
 
+def _validate_codex_model_available(orch: Orchestrator, model_id: str) -> str | None:
+    """Return a user-facing error when a Codex model is not locally discovered."""
+    if orch.models.provider_for(model_id) != "codex":
+        return None
+
+    codex_cache = (
+        orch._observers.codex_cache_obs.get_cache() if orch._observers.codex_cache_obs else None
+    )
+    if codex_cache is None or not codex_cache.models:
+        return None
+
+    if codex_cache.validate_model(model_id):
+        return None
+
+    available = ", ".join(m.id for m in codex_cache.models)
+    return t("model.codex_model_not_available", model=model_id, available=available)
+
+
 # Built-in Gemini aliases accepted by the Gemini CLI as `--model` values.
 # `auto` lets the CLI pick the best model per request; `pro`/`flash`/`flash-lite`
 # select the latest model of that tier without pinning a specific version.
@@ -264,9 +282,7 @@ async def model_selector_start(
     codex_cache = (
         orch._observers.codex_cache_obs.get_cache() if orch._observers.codex_cache_obs else None
     )
-    authenticated = [
-        name for name, res in auth.items() if res.status == AuthStatus.AUTHENTICATED
-    ]
+    authenticated = [name for name, res in auth.items() if res.status == AuthStatus.AUTHENTICATED]
     authed = [
         name
         for name in authenticated
@@ -343,7 +359,7 @@ async def handle_model_callback(  # noqa: PLR0911
     return SelectorResponse(text=t("model.unknown_action"))
 
 
-async def switch_model(  # noqa: C901, PLR0912
+async def switch_model(  # noqa: C901, PLR0911, PLR0912
     orch: Orchestrator,
     key: SessionKey,
     model_id: str,
@@ -359,6 +375,8 @@ async def switch_model(  # noqa: C901, PLR0912
         return model_switch_denied_text()
 
     new_provider = orch.models.provider_for(model_id)
+    if validation_error := _validate_codex_model_available(orch, model_id):
+        return validation_error
     if not is_model_allowed(orch._config, user_id, model_id, provider=new_provider):
         return model_denied_text(model_id)
     if (
