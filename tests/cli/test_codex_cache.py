@@ -83,6 +83,74 @@ async def test_load_from_disk(tmp_path: Path) -> None:
         mock_discover.assert_not_called()  # Should not refresh if fresh
 
 
+async def test_load_from_old_codex_cache_adds_known_default(tmp_path: Path) -> None:
+    """Old bundled Codex caches should expose the newest known default in memory."""
+    cache_path = tmp_path / "codex_models.json"
+    now = datetime.now(UTC).isoformat()
+    cache_path.write_text(
+        f"""{{
+        "last_updated": "{now}",
+        "models": [
+            {{
+                "id": "gpt-5.5",
+                "display_name": "GPT-5.5",
+                "description": "previous default",
+                "supported_efforts": ["low", "medium", "high", "xhigh"],
+                "default_effort": "medium",
+                "is_default": true
+            }}
+        ]
+    }}"""
+    )
+
+    with patch("ductor_bot.cli.codex_cache.discover_codex_models", AsyncMock()) as mock_discover:
+        result = await CodexModelCache.load_or_refresh(cache_path)
+
+    assert [m.id for m in result.models] == ["gpt-5.6", "gpt-5.5"]
+    assert result.models[0].is_default is True
+    assert result.models[1].is_default is False
+    mock_discover.assert_not_called()
+
+    disk_data = json.loads(cache_path.read_text())
+    assert [m["id"] for m in disk_data["models"]] == ["gpt-5.5"]
+
+
+async def test_old_codex_discovery_result_adds_known_default(tmp_path: Path) -> None:
+    """Old Codex discovery results should be augmented before saving."""
+    cache_path = tmp_path / "codex_models.json"
+    old_models = [
+        CodexModelInfo(
+            id="gpt-5.5",
+            display_name="GPT-5.5",
+            description="previous default",
+            supported_efforts=("low", "medium", "high", "xhigh"),
+            default_effort="medium",
+            is_default=True,
+        ),
+        CodexModelInfo(
+            id="gpt-5.4",
+            display_name="GPT-5.4",
+            description="previous model",
+            supported_efforts=("low", "medium", "high", "xhigh"),
+            default_effort="medium",
+            is_default=False,
+        ),
+    ]
+
+    with patch(
+        "ductor_bot.cli.codex_cache.discover_codex_models",
+        AsyncMock(return_value=old_models),
+    ):
+        result = await CodexModelCache.load_or_refresh(cache_path, force_refresh=True)
+
+    assert [m.id for m in result.models] == ["gpt-5.6", "gpt-5.5", "gpt-5.4"]
+    assert result.models[0].is_default is True
+    assert result.models[1].is_default is False
+
+    disk_data = json.loads(cache_path.read_text())
+    assert [m["id"] for m in disk_data["models"]] == ["gpt-5.6", "gpt-5.5", "gpt-5.4"]
+
+
 async def test_refresh_on_stale(tmp_path: Path, sample_models: list[CodexModelInfo]) -> None:
     """Should refresh cache if stale (>24h)."""
     cache_path = tmp_path / "codex_models.json"

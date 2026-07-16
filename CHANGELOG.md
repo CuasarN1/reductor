@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.19.2 - 2026-07-16
+
+### Fixed
+
+- Codex model discovery results that still look like the older bundled
+  `gpt-5.5`/`gpt-5.4` model set are now overlaid with `gpt-5.6` in ReDuctor's
+  cache, so `/model` shows GPT-5.6 even when the installed Codex CLI has not
+  refreshed its model list yet.
+
 ## v0.19.1 - 2026-07-16
 
 ### Added
