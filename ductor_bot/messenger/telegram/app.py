@@ -1189,7 +1189,7 @@ class TelegramBot:
                     provider_override=provider_override,
                     model_override=model_override,
                 )
-                task_id, session_name = self._orch.submit_named_session(
+                task_id, session_name = await self._orch.submit_named_session(
                     chat_id,
                     prompt,
                     ns_request,

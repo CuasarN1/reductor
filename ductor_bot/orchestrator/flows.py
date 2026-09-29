@@ -19,10 +19,10 @@ from ductor_bot.i18n import t
 from ductor_bot.infra.inflight import InflightTurn
 from ductor_bot.log_context import set_log_context
 from ductor_bot.model_policy import (
+    SelectedModelTarget,
     can_switch_models,
     model_switch_denied_text,
     request_policy_denial,
-    select_model_target_for_prompt,
     subject_id_for_request,
 )
 from ductor_bot.orchestrator.hooks import HookContext
@@ -106,18 +106,27 @@ async def _prepare_normal(
 
     Returns (request, session) so the caller can update the session after the CLI call.
     """
-    user_id = subject_id_for_request(key.user_id, key.chat_id, key.transport)
     policy_selected = False
     reasoning_effort_override: str | None = None
     selected = None
     if model_override is None:
-        selected = select_model_target_for_prompt(
-            orch._config,
-            user_id,
-            text,
-            default_model=orch._config.model,
-            provider_for=orch.models.provider_for,
+        active = await orch._sessions.get_active(key)
+        has_execution_history = bool(
+            active
+            and any(
+                provider_session.session_id or provider_session.message_count > 0
+                for provider_session in active.provider_sessions.values()
+            )
         )
+        # An LLM-router model decision is a session target, not a per-turn
+        # target.  Follow-ups may reclassify Codex reasoning effort, but their
+        # candidate pool is pinned so they cannot lose conversation context or
+        # undo a persistent /model switch.
+        session_target = None
+        if orch._config.model_policy.router.enabled and has_execution_history:
+            assert active is not None
+            session_target = SelectedModelTarget(model=active.model, provider=active.provider)
+        selected = await orch.select_execution_target(key, text, session_target=session_target)
     if selected is not None:
         requested_model = selected.model
         req_provider = selected.provider

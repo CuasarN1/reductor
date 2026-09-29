@@ -81,6 +81,8 @@ def resolve_model_policy(
 
 def can_switch_models(config: AgentConfig, user_id: int | None) -> bool:
     """Return whether this user may persistently switch models via /model."""
+    if is_model_policy_admin(config, user_id):
+        return True
     return resolve_model_policy(config.model_policy, user_id).allow_model_switch
 
 
@@ -93,6 +95,12 @@ def is_model_policy_admin(config: AgentConfig, user_id: int | None) -> bool:
     return user_id in config.model_policy.admin_user_ids
 
 
+def model_policy_admin_user_ids(config: AgentConfig) -> tuple[int, ...]:
+    """Return owner plus configured policy admins in stable, deduplicated order."""
+    owner = config.allowed_user_ids[:1]
+    return tuple(dict.fromkeys([*owner, *config.model_policy.admin_user_ids]))
+
+
 def is_model_allowed(
     config: AgentConfig,
     user_id: int | None,
@@ -101,6 +109,8 @@ def is_model_allowed(
     provider: str = "",
 ) -> bool:
     """Return whether a model is allowed for this user."""
+    if is_model_policy_admin(config, user_id):
+        return True
     resolved = resolve_model_policy(config.model_policy, user_id)
     allowed = resolved.allowed_models
     if not resolved.enabled or allowed is None or _WILDCARD in allowed:
@@ -129,6 +139,8 @@ def is_reasoning_effort_allowed(
     effort: str,
 ) -> bool:
     """Return whether a Codex reasoning effort is allowed for this user."""
+    if is_model_policy_admin(config, user_id):
+        return True
     resolved = resolve_model_policy(config.model_policy, user_id)
     allowed = resolved.allowed_reasoning_efforts
     if not resolved.enabled or allowed is None or _WILDCARD in allowed:
@@ -186,6 +198,8 @@ def select_model_target_for_prompt(  # noqa: PLR0913
     The admin-controlled ``allowed_models`` order is intentional: cheaper or
     preferred models should be listed first, stronger fallbacks later.
     """
+    if is_model_policy_admin(config, user_id):
+        return None
     resolved = resolve_model_policy(config.model_policy, user_id)
     if not resolved.enabled or resolved.allow_model_switch:
         return None
@@ -214,6 +228,8 @@ def request_policy_denial(
     reasoning_effort: str,
 ) -> str | None:
     """Return denial text for an effective CLI target, or None when allowed."""
+    if is_model_policy_admin(config, user_id):
+        return None
     return request_policy_denial_for_policy(
         config.model_policy,
         user_id,

@@ -8,7 +8,11 @@ from re import fullmatch
 from typing import TYPE_CHECKING, cast
 
 from ductor_bot.config import ModelPolicyRule, update_config_file_async
-from ductor_bot.model_policy import is_model_policy_admin, subject_id_for_key
+from ductor_bot.model_policy import (
+    is_model_policy_admin,
+    model_policy_admin_user_ids,
+    subject_id_for_key,
+)
 from ductor_bot.orchestrator.registry import OrchestratorResult
 
 if TYPE_CHECKING:
@@ -384,7 +388,10 @@ async def _persist(orch: Orchestrator, *, include_groups: bool = False) -> None:
         hot["allowed_group_ids"] = orch._config.allowed_group_ids
 
     await update_config_file_async(orch.paths.config_path, **updates)
-    orch._cli_service.update_model_policy(orch._config.model_policy)
+    orch._cli_service.update_model_policy(
+        orch._config.model_policy,
+        admin_user_ids=model_policy_admin_user_ids(orch._config),
+    )
     handler = getattr(orch, "_config_hot_reload_handler", None)
     if handler is not None:
         handler(orch._config, hot)
@@ -483,7 +490,9 @@ async def _add_user(orch: Orchestrator, args: list[str]) -> OrchestratorResult:
     if error is not None:
         return OrchestratorResult(text=error)
     if len(positionals) != 1:
-        return OrchestratorResult(text="Usage: `/access add <user_id|@username> [models=...] [efforts=...] [switch=on|off] [admin=on|off]`")
+        return OrchestratorResult(
+            text="Usage: `/access add <user_id|@username> [models=...] [efforts=...] [switch=on|off] [admin=on|off]`"
+        )
 
     user_id, error = await _resolve_user_ref(orch, positionals[0])
     if error is not None or user_id is None:
@@ -511,7 +520,9 @@ async def _add_user(orch: Orchestrator, args: list[str]) -> OrchestratorResult:
 
     await _persist(orch)
     status = "added" if added else "already allowlisted"
-    admin_text = " admin=on" if admin_state is True else " admin=off" if admin_state is False else ""
+    admin_text = (
+        " admin=on" if admin_state is True else " admin=off" if admin_state is False else ""
+    )
     return OrchestratorResult(
         text=f"Access updated: `{user_id}` {status}{admin_text}.\n{_format_effective_user(orch, user_id)}"
     )
@@ -535,7 +546,9 @@ async def _set_user_policy(  # noqa: PLR0911
     assert user_id is not None
 
     if user_id not in orch._config.allowed_user_ids:
-        return OrchestratorResult(text=f"`{user_id}` is not allowlisted. Use `/access add {user_id}` first.")
+        return OrchestratorResult(
+            text=f"`{user_id}` is not allowlisted. Use `/access add {user_id}` first."
+        )
     if not options:
         rule = orch._config.model_policy.users.get(str(user_id))
         return OrchestratorResult(text=f"`{user_id}`: {_format_rule(rule)}")
@@ -572,9 +585,13 @@ async def _set_default_policy(orch: Orchestrator, args: list[str]) -> Orchestrat
     if error is not None:
         return OrchestratorResult(text=error)
     if positionals:
-        return OrchestratorResult(text="Usage: `/access default [models=...] [efforts=...] [switch=on|off]`")
+        return OrchestratorResult(
+            text="Usage: `/access default [models=...] [efforts=...] [switch=on|off]`"
+        )
     if not options:
-        return OrchestratorResult(text=f"default: {_format_rule(orch._config.model_policy.default)}")
+        return OrchestratorResult(
+            text=f"default: {_format_rule(orch._config.model_policy.default)}"
+        )
 
     policy_patch, error = _parse_policy_options(options)
     if error is not None:
@@ -683,7 +700,9 @@ async def _remove_user(orch: Orchestrator, args: list[str]) -> OrchestratorResul
     if error is not None or user_id is None:
         return OrchestratorResult(text=error or "Invalid Telegram user target.")
     if user_id == _owner_id(orch):
-        return OrchestratorResult(text="Refusing to remove the owner user. Put another owner first in allowed_user_ids manually if you need to rotate ownership.")
+        return OrchestratorResult(
+            text="Refusing to remove the owner user. Put another owner first in allowed_user_ids manually if you need to rotate ownership."
+        )
 
     before = list(orch._config.allowed_user_ids)
     orch._config.allowed_user_ids = [uid for uid in before if uid != user_id]
@@ -745,8 +764,7 @@ def _actual_reply_body(text: str) -> str:
     """Strip Telegram reply citation wrappers before running access-change guards."""
     lowered = text.casefold()
     matches = [
-        (lowered.rfind(marker.casefold()), marker)
-        for marker in _TELEGRAM_REPLY_BODY_MARKERS
+        (lowered.rfind(marker.casefold()), marker) for marker in _TELEGRAM_REPLY_BODY_MARKERS
     ]
     index, marker = max(matches, key=lambda item: item[0])
     if index < 0:
@@ -790,8 +808,7 @@ def _is_user_access_change_request(normalized: str) -> bool:
         "админ",
     )
     if not (
-        _contains_any(normalized, access_terms)
-        and _contains_any(normalized, _ACCESS_CHANGE_TERMS)
+        _contains_any(normalized, access_terms) and _contains_any(normalized, _ACCESS_CHANGE_TERMS)
     ):
         return False
 

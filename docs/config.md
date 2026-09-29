@@ -576,8 +576,9 @@ Automation flow:
 
 ## `model_policy`
 
-Disabled by default. When enabled, Ductor evaluates the effective Telegram user ID
-(`message.from_user.id`, including in groups) before model selection or CLI execution.
+Restrictions and two-stage request routing are disabled by default. Ductor evaluates
+the effective Telegram user ID (`message.from_user.id`, including in groups) before
+model selection or CLI execution.
 
 Example:
 
@@ -586,6 +587,14 @@ Example:
   "model_policy": {
     "enabled": true,
     "admin_user_ids": [123456789],
+    "router": {
+      "enabled": true,
+      "provider": "codex",
+      "model": "gpt-6-luna",
+      "reasoning_effort": "low",
+      "timeout_seconds": 30.0,
+      "max_prompt_chars": 12000
+    },
     "default": {
       "allowed_models": ["gpt-5.4-mini"],
       "allowed_reasoning_efforts": ["low", "medium"],
@@ -604,14 +613,38 @@ Example:
 
 Rules:
 
-- `admin_user_ids` lists users who may manage access through `/access`. The first
-  `allowed_user_ids` entry is always treated as an owner-admin for backward
-  compatibility and lockout protection.
+- `model_policy.enabled` controls per-user restrictions; `router.enabled` controls
+  two-stage routing independently. You may enable routing while leaving restrictions
+  disabled, in which case every authenticated, discovered model is eligible.
+- `admin_user_ids` lists users who may manage access through `/access`. Policy admins
+  and the first `allowed_user_ids` owner always have the full locally available model
+  and reasoning-effort pool, regardless of default or per-user restrictions.
+- `router.enabled=true` enables two-stage routing for ordinary messages and new,
+  unqualified `/session <prompt>` requests. A separate stateless call to
+  `router.provider` / `router.model` classifies the request, then the chosen execution
+  model handles it in the normal user session. Once an execution session has history,
+  follow-up candidates are pinned to its provider/model (the router may still tune
+  Codex reasoning effort), so context is not fragmented and persistent `/model`
+  changes remain in effect. The classification session ID is never saved or reused.
+- The router receives only authenticated providers and locally known/discovered models.
+  Non-admin candidates are additionally limited by their effective `allowed_models`
+  and `allowed_reasoning_efforts`; admins receive the unrestricted available pool.
+- Router output is strict JSON and is validated against the supplied candidates. CLI
+  errors, timeouts, unavailable router configuration, malformed JSON, and invalid
+  choices fall back deterministically to the legacy keyword/length heuristic (when
+  policy auto-selection applies) or the current default/session target.
+- `router.max_prompt_chars` limits classifier input only. Oversized requests retain
+  their beginning and end; the full prompt is still sent to the execution model.
 - `default` applies to every user unless a `users["<telegram_user_id>"]` entry overrides a field.
 - `allowed_models` supports exact model IDs, `"*"`, prefix patterns like `"gpt-5.4*"`, and provider patterns like `"codex:*"` or `"provider:claude"`.
-- For users with `allow_model_switch=false`, exact `allowed_models` entries are treated as an ordered auto-router list: put cheaper/preferred models first and stronger fallbacks later.
+- When the LLM router is disabled or fails, users with `allow_model_switch=false` use
+  exact `allowed_models` as the ordered legacy heuristic list: put cheaper/preferred
+  models first and stronger fallbacks later.
 - `allowed_reasoning_efforts` applies to Codex requests only.
-- `allow_model_switch=false` disables manual model choice for that user: `/model`, selector callbacks, `@model`, and `/session @provider/model` are rejected. Ordinary messages and `/session <prompt>` are routed automatically within the allowed list.
+- `allow_model_switch=false` disables manual model choice for that user: `/model`,
+  selector callbacks, `@model`, and `/session @provider/model` are rejected. Explicit
+  authorized overrides still win over automatic routing. The setting does not disable
+  the LLM router for ordinary messages.
 - Enforcement happens in `/model`, inline selector callbacks, `@model` directives, `/session`, named-session follow-ups, and `CLIService`.
 
 Bot access commands:

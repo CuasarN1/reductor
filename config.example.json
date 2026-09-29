@@ -29,6 +29,14 @@
     "model_policy": {
         "enabled": false,
         "admin_user_ids": [123456789],
+        "router": {
+            "enabled": false,
+            "provider": "codex",
+            "model": "gpt-6-luna",
+            "reasoning_effort": "low",
+            "timeout_seconds": 30.0,
+            "max_prompt_chars": 12000
+        },
         "default": {
             "allowed_models": ["gpt-5.4-mini"],
             "allowed_reasoning_efforts": ["low", "medium"],

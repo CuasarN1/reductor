@@ -27,14 +27,21 @@ from ductor_bot.errors import (
 from ductor_bot.infra.docker import DockerManager
 from ductor_bot.infra.inflight import InflightTracker
 from ductor_bot.model_policy import (
+    SelectedModelTarget,
     can_switch_models,
+    filter_allowed_reasoning_efforts,
+    is_model_allowed,
     is_model_policy_admin,
     model_denied_text,
+    model_policy_admin_user_ids,
     model_switch_denied_text,
     request_policy_denial,
-    select_model_target_for_prompt,
     subject_id_for_key,
 )
+from ductor_bot.model_policy import (
+    select_model_target_for_prompt as select_heuristic_model_target,
+)
+from ductor_bot.model_router import RouterCandidate, classify_model_target
 from ductor_bot.orchestrator.access_admin import (
     access_change_command_guidance_text,
     access_change_denied_text,
@@ -179,6 +186,7 @@ class Orchestrator:
                 transcribe_command=config.transcription.audio_command,
                 video_transcribe_command=config.transcription.video_command,
                 model_policy=config.model_policy,
+                model_policy_admin_user_ids=model_policy_admin_user_ids(config),
             ),
             models=self._providers.models,
             available_providers=frozenset(),
@@ -329,6 +337,117 @@ class Orchestrator:
     def models(self) -> ModelRegistry:
         """Public access to the model registry (delegates to ProviderManager)."""
         return self._providers.models
+
+    async def select_execution_target(
+        self,
+        key: SessionKey,
+        prompt: str,
+        *,
+        session_target: SelectedModelTarget | None = None,
+    ) -> SelectedModelTarget | None:
+        """Select an automatic execution target, with deterministic fallback.
+
+        When a conversation already has execution history, ``session_target``
+        pins routing to that provider/model.  The router may still tune Codex
+        reasoning effort, but it cannot move a follow-up away from its context.
+        """
+        user_id = subject_id_for_key(key)
+        fallback = session_target
+        if fallback is None:
+            fallback = select_heuristic_model_target(
+                self._config,
+                user_id,
+                prompt,
+                default_model=self._config.model,
+                provider_for=self.models.provider_for,
+            )
+        router = self._config.model_policy.router
+        if not router.enabled:
+            return fallback
+
+        candidates: list[RouterCandidate] = []
+        for available in self._providers.available_models():
+            if session_target is not None and (
+                available.model != session_target.model
+                or available.provider != session_target.provider
+            ):
+                continue
+            if not is_model_allowed(
+                self._config,
+                user_id,
+                available.model,
+                provider=available.provider,
+            ):
+                continue
+            efforts: tuple[str, ...] = ()
+            if available.provider == "codex":
+                efforts = filter_allowed_reasoning_efforts(
+                    self._config,
+                    user_id,
+                    available.reasoning_efforts,
+                )
+                if not efforts:
+                    continue
+            candidates.append(
+                RouterCandidate(
+                    model=available.model,
+                    provider=available.provider,
+                    reasoning_efforts=efforts,
+                    description=available.description,
+                )
+            )
+
+        fallback = self._available_router_fallback(fallback, candidates)
+        if not self._providers.is_available_model(router.provider, router.model):
+            logger.warning(
+                "Model router target unavailable provider=%s model=%s; using fallback",
+                router.provider,
+                router.model,
+            )
+            return fallback
+
+        selected = await classify_model_target(
+            self._cli_service,
+            router,
+            prompt,
+            tuple(candidates),
+            chat_id=key.chat_id,
+            topic_id=key.topic_id,
+            transport=key.transport,
+        )
+        return selected or fallback
+
+    def _available_router_fallback(
+        self,
+        fallback: SelectedModelTarget | None,
+        candidates: list[RouterCandidate],
+    ) -> SelectedModelTarget | None:
+        """Keep legacy fallback semantics while rejecting unavailable targets."""
+        if fallback is None:
+            return None
+        candidate = next(
+            (
+                item
+                for item in candidates
+                if item.model == fallback.model and item.provider == fallback.provider
+            ),
+            candidates[0] if candidates else None,
+        )
+        if candidate is None:
+            return None
+        effort: str | None = None
+        if candidate.provider == "codex":
+            desired = fallback.reasoning_effort or self._config.reasoning_effort
+            effort = (
+                desired
+                if desired in candidate.reasoning_efforts
+                else candidate.reasoning_efforts[0]
+            )
+        return SelectedModelTarget(
+            model=candidate.model,
+            provider=candidate.provider,
+            reasoning_effort=effort,
+        )
 
     @property
     def gemini_api_key_mode(self) -> bool:
@@ -625,7 +744,7 @@ class Orchestrator:
                 return await heartbeat_flow(self, key, prompt=prompt, ack_token=ack_token)
         return await heartbeat_flow(self, key, prompt=prompt, ack_token=ack_token)
 
-    def submit_named_session(
+    async def submit_named_session(
         self,
         chat_id: int,
         prompt: str,
@@ -638,16 +757,20 @@ class Orchestrator:
             msg = "Background observer not initialized"
             raise RuntimeError(msg)
 
-        user_id = request.user_id if request.user_id is not None else (chat_id if chat_id > 0 else None)
+        user_id = (
+            request.user_id if request.user_id is not None else (chat_id if chat_id > 0 else None)
+        )
         model_policy_selected = False
         selected = None
         if not request.provider_override and not request.model_override:
-            selected = select_model_target_for_prompt(
-                self._config,
-                user_id,
+            selected = await self.select_execution_target(
+                SessionKey(
+                    chat_id=chat_id,
+                    topic_id=request.thread_id,
+                    user_id=request.user_id,
+                    transport="tg",
+                ),
                 prompt,
-                default_model=self._config.model,
-                provider_for=self.models.provider_for,
             )
         if selected is not None:
             model_name = selected.model
@@ -835,6 +958,7 @@ class Orchestrator:
                 "reasoning_effort",
                 "cli_parameters",
                 "model_policy",
+                "allowed_user_ids",
             )
         ):
             self._cli_service.update_config(
@@ -855,6 +979,9 @@ class Orchestrator:
                     transcribe_command=config.transcription.audio_command,
                     video_transcribe_command=config.transcription.video_command,
                     model_policy=config.model_policy,
+                    model_policy_admin_user_ids=model_policy_admin_user_ids(config),
+                    agent_name=self._cli_service._config.agent_name,
+                    interagent_port=self._cli_service._config.interagent_port,
                 )
             )
 

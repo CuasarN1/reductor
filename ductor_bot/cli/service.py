@@ -147,6 +147,7 @@ class CLIServiceConfig:
     transcribe_command: str = ""
     video_transcribe_command: str = ""
     model_policy: ModelPolicyConfig = field(default_factory=ModelPolicyConfig)
+    model_policy_admin_user_ids: tuple[int, ...] = ()
 
     def cli_parameters_for_provider(self, provider: str) -> list[str]:
         """Return CLI parameters for the given provider."""
@@ -196,9 +197,21 @@ class CLIService:
         """Update the default reasoning effort after wizard selection."""
         self._config = replace(self._config, reasoning_effort=effort)
 
-    def update_model_policy(self, policy: ModelPolicyConfig) -> None:
+    def update_model_policy(
+        self,
+        policy: ModelPolicyConfig,
+        *,
+        admin_user_ids: tuple[int, ...] | None = None,
+    ) -> None:
         """Update per-user model policy after access-management changes."""
-        self._config = replace(self._config, model_policy=policy)
+        if admin_user_ids is None:
+            self._config = replace(self._config, model_policy=policy)
+        else:
+            self._config = replace(
+                self._config,
+                model_policy=policy,
+                model_policy_admin_user_ids=admin_user_ids,
+            )
 
     def update_config(self, config: CLIServiceConfig) -> None:
         """Replace the full service config (used by config hot-reload)."""
@@ -236,6 +249,38 @@ class CLIService:
         )
         elapsed_ms = (time.monotonic() - t0) * 1000
 
+        agent_resp = _cli_response_to_agent_response(response)
+        self._log_call(request, agent_resp, elapsed_ms)
+        return agent_resp
+
+    async def execute_router(self, request: AgentRequest) -> AgentResponse:
+        """Execute one policy-exempt, stateless classification request.
+
+        This deliberately does not call :meth:`execute`: classifier traffic
+        must never resume or create the user's execution-model session, and the
+        configured router model is infrastructure rather than a user-selected
+        execution target.
+        """
+        provider, _model = self.resolve_provider(request)
+        if provider not in self._available_providers:
+            return AgentResponse(
+                result=f"Router provider '{provider}' is not authenticated.",
+                is_error=True,
+            )
+        if request.resume_session or request.continue_session:
+            return AgentResponse(result="Router requests must be stateless.", is_error=True)
+
+        cli = self._make_cli(request, router=True)
+        logger.info("CLI router starting model=%s", self._resolve_model(request))
+        t0 = time.monotonic()
+        response = await cli.send(
+            prompt=request.prompt,
+            resume_session=None,
+            continue_session=False,
+            timeout_seconds=request.timeout_seconds,
+            timeout_controller=None,
+        )
+        elapsed_ms = (time.monotonic() - t0) * 1000
         agent_resp = _cli_response_to_agent_response(response)
         self._log_call(request, agent_resp, elapsed_ms)
         return agent_resp
@@ -431,7 +476,7 @@ class CLIService:
         model = request.model_override or self._config.default_model
         return self._models.provider_for(model), model
 
-    def _make_cli(self, request: AgentRequest) -> BaseCLI:
+    def _make_cli(self, request: AgentRequest, *, router: bool = False) -> BaseCLI:
         """Create a BaseCLI instance for the given request."""
         provider, model = self.resolve_provider(request)
 
@@ -442,11 +487,15 @@ class CLIService:
                 model=model,
                 system_prompt=request.system_prompt,
                 append_system_prompt=request.append_system_prompt,
-                max_turns=self._config.max_turns,
-                max_budget_usd=self._config.max_budget_usd,
-                permission_mode=self._config.permission_mode,
-                reasoning_effort=request.reasoning_effort_override
-                or self._config.reasoning_effort,
+                max_turns=1 if router else self._config.max_turns,
+                max_budget_usd=None if router else self._config.max_budget_usd,
+                disallowed_tools=["*"] if router else [],
+                # Router input is untrusted user text.  Never inherit the main
+                # agent's bypass mode or provider-specific CLI flags here:
+                # Codex then runs read-only, Claude has every tool denied, and
+                # Gemini/Antigravity cannot auto-approve tool calls.
+                permission_mode="default" if router else self._config.permission_mode,
+                reasoning_effort=request.reasoning_effort_override or self._config.reasoning_effort,
                 gemini_api_key=self._config.gemini_api_key,
                 docker_container=self._config.docker_container,
                 process_registry=self._process_registry,
@@ -454,7 +503,7 @@ class CLIService:
                 topic_id=request.topic_id,
                 transport=request.transport,
                 process_label=request.process_label,
-                cli_parameters=self._config.cli_parameters_for_provider(provider),
+                cli_parameters=[] if router else self._config.cli_parameters_for_provider(provider),
                 agent_name=self._config.agent_name,
                 interagent_port=self._config.interagent_port,
                 transcribe_command=self._config.transcribe_command,
@@ -466,6 +515,8 @@ class CLIService:
         """Return model-policy denial text for this request, if any."""
         provider, model = self.resolve_provider(request)
         user_id = subject_id_for_request(request.user_id, request.chat_id, request.transport)
+        if user_id is not None and user_id in self._config.model_policy_admin_user_ids:
+            return None
         resolved = resolve_model_policy(self._config.model_policy, user_id)
         if (
             resolved.enabled

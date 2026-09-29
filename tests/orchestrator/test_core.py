@@ -272,7 +272,7 @@ async def test_user_model_policy_override_allows_owner(orch: Orchestrator) -> No
     mock_execute.assert_called_once()
 
 
-def test_submit_named_session_rejects_disallowed_model(orch: Orchestrator) -> None:
+async def test_submit_named_session_rejects_disallowed_model(orch: Orchestrator) -> None:
     orch._config.model_policy = ModelPolicyConfig(
         enabled=True,
         default=ModelPolicyRule(allowed_models=["sonnet"]),
@@ -280,7 +280,7 @@ def test_submit_named_session_rejects_disallowed_model(orch: Orchestrator) -> No
     orch._observers.background = MagicMock()
 
     with pytest.raises(ValueError, match="Manual model selection is disabled"):
-        orch.submit_named_session(
+        await orch.submit_named_session(
             -100,
             "Run this",
             NamedSessionRequest(
@@ -293,7 +293,7 @@ def test_submit_named_session_rejects_disallowed_model(orch: Orchestrator) -> No
         )
 
 
-def test_submit_named_session_passes_user_id_to_background(orch: Orchestrator) -> None:
+async def test_submit_named_session_passes_user_id_to_background(orch: Orchestrator) -> None:
     orch._config.model_policy = ModelPolicyConfig(
         enabled=True,
         default=ModelPolicyRule(allowed_models=["sonnet"]),
@@ -303,7 +303,7 @@ def test_submit_named_session_passes_user_id_to_background(orch: Orchestrator) -
     background.submit.return_value = "task-1"
     orch._observers.background = background
 
-    task_id, _session_name = orch.submit_named_session(
+    task_id, _session_name = await orch.submit_named_session(
         -100,
         "Run this",
         NamedSessionRequest(
@@ -320,7 +320,7 @@ def test_submit_named_session_passes_user_id_to_background(orch: Orchestrator) -
     assert submitted.user_id == 1
 
 
-def test_submit_named_session_auto_selects_policy_model(orch: Orchestrator) -> None:
+async def test_submit_named_session_auto_selects_policy_model(orch: Orchestrator) -> None:
     orch._config.model_policy = ModelPolicyConfig(
         enabled=True,
         default=ModelPolicyRule(allowed_models=["sonnet", "opus"]),
@@ -329,7 +329,7 @@ def test_submit_named_session_auto_selects_policy_model(orch: Orchestrator) -> N
     background.submit.return_value = "task-1"
     orch._observers.background = background
 
-    task_id, _session_name = orch.submit_named_session(
+    task_id, _session_name = await orch.submit_named_session(
         -100,
         "Please implement and test this change",
         NamedSessionRequest(message_id=10, thread_id=None, user_id=99),

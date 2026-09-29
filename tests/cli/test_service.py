@@ -22,6 +22,7 @@ def _make_service(**overrides: Any) -> CLIService:
         max_budget_usd=overrides.pop("max_budget_usd", None),
         permission_mode=overrides.pop("permission_mode", "bypassPermissions"),
         model_policy=overrides.pop("model_policy", ModelPolicyConfig()),
+        model_policy_admin_user_ids=overrides.pop("model_policy_admin_user_ids", ()),
     )
     models = ModelRegistry()
 
@@ -82,6 +83,66 @@ async def test_execute_rejects_model_policy_violation() -> None:
     assert resp.is_error is True
     assert "not allowed" in resp.result
     mock_create.assert_not_called()
+
+
+async def test_execute_allows_policy_admin_without_explicit_wildcard_rule() -> None:
+    svc = _make_service(
+        model_policy=ModelPolicyConfig(
+            enabled=True,
+            default=ModelPolicyRule(allowed_models=["sonnet"], allow_model_switch=False),
+        ),
+        model_policy_admin_user_ids=(99,),
+    )
+    with patch("ductor_bot.cli.service.create_cli") as mock_create:
+        mock_cli = AsyncMock()
+        mock_cli.send.return_value = CLIResponse(result="ok")
+        mock_create.return_value = mock_cli
+        resp = await svc.execute(
+            AgentRequest(
+                prompt="hello",
+                chat_id=1,
+                user_id=99,
+                model_override="opus",
+                provider_override="claude",
+            )
+        )
+
+    assert resp.result == "ok"
+    assert resp.is_error is False
+
+
+async def test_execute_router_is_stateless_and_policy_exempt() -> None:
+    svc = _make_service(
+        model_policy=ModelPolicyConfig(
+            enabled=True,
+            default=ModelPolicyRule(allowed_models=["sonnet"]),
+        )
+    )
+    request = AgentRequest(
+        prompt='{"candidates":[]}',
+        system_prompt="classify",
+        chat_id=1,
+        user_id=99,
+        model_override="haiku",
+        provider_override="claude",
+        process_label="model-router",
+    )
+    with patch("ductor_bot.cli.service.create_cli") as mock_create:
+        mock_cli = AsyncMock()
+        mock_cli.send.return_value = CLIResponse(result='{"candidate_id":"c0"}')
+        mock_create.return_value = mock_cli
+        resp = await svc.execute_router(request)
+
+    assert resp.is_error is False
+    send_kwargs = mock_cli.send.call_args.kwargs
+    assert send_kwargs["resume_session"] is None
+    assert send_kwargs["continue_session"] is False
+    cli_config = mock_create.call_args.args[0]
+    assert cli_config.max_turns == 1
+    assert cli_config.max_budget_usd is None
+    assert cli_config.disallowed_tools == ["*"]
+    assert cli_config.permission_mode == "default"
+    assert cli_config.cli_parameters == []
 
 
 async def test_execute_streaming_success() -> None:

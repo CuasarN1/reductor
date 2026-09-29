@@ -253,11 +253,43 @@ class ModelPolicyRule(BaseModel):
         return value
 
 
+class ModelRouterConfig(BaseModel):
+    """Two-stage LLM router configuration.
+
+    The router runs as a separate, stateless CLI request.  Its model is not an
+    execution candidate unless the user's effective policy also allows it.
+    """
+
+    enabled: bool = False
+    provider: str = "codex"
+    model: str = "gpt-6-luna"
+    reasoning_effort: str = "low"
+    timeout_seconds: float = Field(default=30.0, gt=0)
+    max_prompt_chars: int = Field(default=12000, ge=256)
+
+    @field_validator("provider")
+    @classmethod
+    def _validate_provider(cls, value: str) -> str:
+        provider = value.strip().lower()
+        if provider not in {"claude", "codex", "gemini", "antigravity"}:
+            raise ValueError(f"Unsupported router provider: {value}")
+        return provider
+
+    @field_validator("model", "reasoning_effort")
+    @classmethod
+    def _require_nonempty(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Router model and reasoning_effort must not be empty")
+        return normalized
+
+
 class ModelPolicyConfig(BaseModel):
     """Optional per-user restrictions for model selection and Codex reasoning."""
 
     enabled: bool = False
     admin_user_ids: list[int] = Field(default_factory=list)
+    router: ModelRouterConfig = Field(default_factory=ModelRouterConfig)
     default: ModelPolicyRule = Field(default_factory=ModelPolicyRule)
     users: dict[str, ModelPolicyRule] = Field(default_factory=dict)
 

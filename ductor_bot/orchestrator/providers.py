@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ductor_bot.config import (
     _GEMINI_ALIASES,
     ANTIGRAVITY_MODELS,
+    ANTIGRAVITY_MODELS_ORDERED,
     CLAUDE_MODELS,
+    CLAUDE_MODELS_ORDERED,
     ModelRegistry,
     get_antigravity_models,
     get_gemini_models,
@@ -25,6 +28,27 @@ if TYPE_CHECKING:
     from ductor_bot.config import AgentConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _claude_model_description(model: str) -> str:
+    base = model.removesuffix("[1m]")
+    descriptions = {
+        "haiku": "Fast, inexpensive model for simple tasks.",
+        "sonnet": "Balanced model for general coding and analysis.",
+        "opus": "Strongest model for difficult, multi-step work.",
+        "fable": "General-purpose model alias managed by Claude Code.",
+    }
+    return descriptions.get(base, "")
+
+
+@dataclass(frozen=True, slots=True)
+class AvailableModel:
+    """A locally available model that may be offered to the request router."""
+
+    provider: str
+    model: str
+    reasoning_efforts: tuple[str, ...] = ()
+    description: str = ""
 
 
 class ProviderManager:
@@ -161,6 +185,53 @@ class ProviderManager:
             return True
         codex = self._codex_cache_fn() if self._codex_cache_fn else None
         return bool(codex and codex.validate_model(candidate))
+
+    def is_available_model(self, provider: str, model: str) -> bool:
+        """Return whether an authenticated provider exposes *model* locally."""
+        if (
+            provider not in self._available_providers
+            or self._models.provider_for(model) != provider
+        ):
+            return False
+        return any(
+            item.provider == provider and item.model == model for item in self.available_models()
+        )
+
+    def available_models(self) -> tuple[AvailableModel, ...]:
+        """Return discovered models for authenticated providers in stable order."""
+        result: list[AvailableModel] = []
+        for provider in ("claude", "codex", "gemini", "antigravity"):
+            if provider not in self._available_providers:
+                continue
+            if provider == "claude":
+                result.extend(
+                    AvailableModel(provider, model, description=_claude_model_description(model))
+                    for model in CLAUDE_MODELS_ORDERED
+                )
+                continue
+            if provider == "codex":
+                codex = self._codex_cache_fn() if self._codex_cache_fn else None
+                if codex is not None:
+                    result.extend(
+                        AvailableModel(
+                            provider,
+                            model.id,
+                            tuple(model.supported_efforts),
+                            model.description,
+                        )
+                        for model in codex.models
+                    )
+                continue
+            if provider == "gemini":
+                discovered = get_gemini_models()
+                aliases = ("auto", "pro", "flash", "flash-lite")
+                models = tuple(dict.fromkeys([*aliases, *sorted(discovered)]))
+                result.extend(AvailableModel(provider, model) for model in models)
+                continue
+            discovered = get_antigravity_models()
+            models = tuple(dict.fromkeys([*ANTIGRAVITY_MODELS_ORDERED, *sorted(discovered)]))
+            result.extend(AvailableModel(provider, model) for model in models)
+        return tuple(result)
 
     def default_model_for_provider(self, provider: str) -> str:
         """Return the default model ID for a provider, or empty string if unknown."""

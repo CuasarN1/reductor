@@ -16,6 +16,7 @@ from ductor_bot.config import (
     ModelPolicyConfig,
     ModelPolicyRule,
     ModelRegistry,
+    ModelRouterConfig,
     StreamingConfig,
     deep_merge_config,
     reset_gemini_models,
@@ -69,6 +70,27 @@ def test_model_policy_config_accepts_user_rules() -> None:
     assert cfg.model_policy.admin_user_ids == [123]
     assert cfg.model_policy.default.allowed_models == ["gpt-5.4-mini"]
     assert cfg.model_policy.users["123"].allowed_models == ["*"]
+
+
+def test_model_router_config_accepts_explicit_settings() -> None:
+    cfg = AgentConfig(
+        model_policy=ModelPolicyConfig(
+            router=ModelRouterConfig(
+                enabled=True,
+                provider="claude",
+                model="haiku",
+                reasoning_effort="low",
+                timeout_seconds=12.5,
+                max_prompt_chars=4096,
+            )
+        )
+    )
+
+    assert cfg.model_policy.router.enabled is True
+    assert cfg.model_policy.router.provider == "claude"
+    assert cfg.model_policy.router.model == "haiku"
+    assert cfg.model_policy.router.timeout_seconds == 12.5
+    assert cfg.model_policy.router.max_prompt_chars == 4096
 
 
 def test_agent_config_normalizes_nullish_gemini_api_key() -> None:
