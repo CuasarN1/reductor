@@ -12,7 +12,6 @@ import aiohttp
 logger = logging.getLogger(__name__)
 
 _PYPI_URL = "https://pypi.org/pypi/ductor/json"
-_GITHUB_RELEASES_URL = "https://api.github.com/repos/PleasePrompto/ductor/releases"
 _DEFAULT_REDUCTOR_GITHUB_REPO = "CuasarN1/reductor"
 _PACKAGE_NAME = "ductor"
 _TIMEOUT = aiohttp.ClientTimeout(total=10)
@@ -144,10 +143,10 @@ async def check_github_release(
             if release is None:
                 release = await _fetch_latest_github_tag(
                     session,
-                _github_tags_url(repo, releases_url),
-                params,
-                include_prereleases=include_prereleases,
-            )
+                    _github_tags_url(repo, releases_url),
+                    params,
+                    include_prereleases=include_prereleases,
+                )
     except (aiohttp.ClientError, TimeoutError, ValueError):
         logger.debug("GitHub version check failed for %s", repo, exc_info=True)
         return None
@@ -237,15 +236,21 @@ async def _fetch_latest_github_tag(
     return None
 
 
-async def fetch_changelog(version: str) -> str | None:
+async def fetch_changelog(
+    version: str,
+    *,
+    repo: str = _DEFAULT_REDUCTOR_GITHUB_REPO,
+    releases_url: str = "",
+) -> str | None:
     """Fetch release notes for *version* from GitHub Releases.
 
     Tries ``v{version}`` tag first, then ``{version}`` without prefix.
     Returns the release body (Markdown) or ``None`` on failure.
     """
     headers = {"Accept": "application/vnd.github+json"}
+    base_url = _github_releases_url(repo, releases_url)
     for tag in (f"v{version}", version):
-        url = f"{_GITHUB_RELEASES_URL}/tags/{tag}"
+        url = f"{base_url}/tags/{tag}"
         try:
             async with (
                 aiohttp.ClientSession(timeout=_TIMEOUT, headers=headers) as session,

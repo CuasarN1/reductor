@@ -7,8 +7,7 @@ Scripts for managing incoming HTTP webhook endpoints.
 **When creating a webhook in `cron_task` mode, you MUST ask:**
 
 1. **Which model?**
-   - `gpt-5.6` - Newest/recommended frontier agentic coding model
-   - `gpt-5.5` - Frontier agentic coding model
+   - `gpt-5.5` - Recommended frontier agentic coding model
    - `gpt-5.4` - Frontier agentic coding model
    - `gpt-5.4-mini` - Smaller, faster frontier coding model
    - `gpt-5.3-codex-spark` - Codex-optimized coding model
@@ -119,7 +118,7 @@ python3 tools/webhook_tools/webhook_add.py \
   --description "Review incoming PR payloads" \
   --mode "cron_task" --task-folder "github-review" \
   --prompt-template "Review PR #{{number}}: {{title}}" \
-  --model gpt-5.6 \
+  --model gpt-5.5 \
   --reasoning-effort high
 ```
 
@@ -223,8 +222,7 @@ Webhooks in `cron_task` mode can override global config settings in `webhooks.js
 
 - `model`: Model name (optional, defaults to global config)
   - Available models:
-    - `"gpt-5.6"` - Newest/recommended frontier agentic coding model
-    - `"gpt-5.5"` - Frontier agentic coding model
+    - `"gpt-5.5"` - Recommended frontier agentic coding model
     - `"gpt-5.4"` - Frontier agentic coding model
     - `"gpt-5.4-mini"` - Smaller, faster frontier coding model
     - `"gpt-5.3-codex-spark"` - Codex-optimized coding model
@@ -244,7 +242,7 @@ Webhooks in `cron_task` mode can override global config settings in `webhooks.js
   "mode": "cron_task",
   "task_folder": "github-review",
   "prompt_template": "Review PR #{{number}}",
-  "model": "gpt-5.6",
+  "model": "gpt-5.5",
   "reasoning_effort": "high",
   "cli_parameters": ["--chrome"]
 }

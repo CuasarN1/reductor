@@ -303,6 +303,7 @@ class TestMakeUpdateChecker:
             repo="CuasarN1/reductor",
             releases_url="",
             include_prereleases=False,
+            fresh=False,
         )
 
     async def test_pypi_source_keeps_package_flow(self) -> None:
@@ -325,4 +326,4 @@ class TestMakeUpdateChecker:
             result = await checker()
 
         assert result == expected
-        mock_check.assert_awaited_once_with()
+        mock_check.assert_awaited_once_with(fresh=False)

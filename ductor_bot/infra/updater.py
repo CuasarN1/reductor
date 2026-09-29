@@ -30,7 +30,7 @@ VersionChecker = Callable[[], Awaitable[VersionInfo | None]]
 _UPGRADE_SENTINEL_NAME = "upgrade-sentinel.json"
 
 
-def make_update_checker(config: AgentConfig) -> VersionChecker:
+def make_update_checker(config: AgentConfig, *, fresh: bool = False) -> VersionChecker:
     """Build the configured version checker for background update notifications."""
     notifications = config.notifications
     source = notifications.update_source.strip().lower()
@@ -41,13 +41,15 @@ def make_update_checker(config: AgentConfig) -> VersionChecker:
                 repo=notifications.update_github_repo,
                 releases_url=notifications.update_github_releases_url,
                 include_prereleases=notifications.update_include_prereleases,
+                fresh=fresh,
             )
 
         return _check_github
 
     if source in {"pypi", "package"}:
+
         async def _check_pypi() -> VersionInfo | None:
-            return await check_pypi()
+            return await check_pypi(fresh=fresh)
 
         return _check_pypi
 

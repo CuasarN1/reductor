@@ -9,6 +9,13 @@ from ductor_bot.orchestrator.commands import cmd_upgrade
 from ductor_bot.orchestrator.core import Orchestrator
 
 
+def _checker(info: VersionInfo | None):
+    async def check() -> VersionInfo | None:
+        return info
+
+    return check
+
+
 class TestCmdUpgrade:
     """Test /upgrade command handler."""
 
@@ -18,7 +25,9 @@ class TestCmdUpgrade:
         )
         with (
             patch("ductor_bot.infra.install.detect_install_mode", return_value="pipx"),
-            patch("ductor_bot.orchestrator.commands.check_pypi", return_value=info),
+            patch(
+                "ductor_bot.orchestrator.commands.make_update_checker", return_value=_checker(info)
+            ),
         ):
             result = await cmd_upgrade(orch, 1, "/upgrade")
 
@@ -37,7 +46,9 @@ class TestCmdUpgrade:
         info = VersionInfo(current="2.0.0", latest="2.0.0", update_available=False, summary="")
         with (
             patch("ductor_bot.infra.install.detect_install_mode", return_value="pip"),
-            patch("ductor_bot.orchestrator.commands.check_pypi", return_value=info),
+            patch(
+                "ductor_bot.orchestrator.commands.make_update_checker", return_value=_checker(info)
+            ),
         ):
             result = await cmd_upgrade(orch, 1, "/upgrade")
 
@@ -50,18 +61,22 @@ class TestCmdUpgrade:
     async def test_handles_pypi_failure(self, orch: Orchestrator) -> None:
         with (
             patch("ductor_bot.infra.install.detect_install_mode", return_value="pipx"),
-            patch("ductor_bot.orchestrator.commands.check_pypi", return_value=None),
+            patch(
+                "ductor_bot.orchestrator.commands.make_update_checker", return_value=_checker(None)
+            ),
         ):
             result = await cmd_upgrade(orch, 1, "/upgrade")
 
-        assert "could not reach" in result.text.lower() or "pypi" in result.text.lower()
+        assert "could not reach" in result.text.lower() or "source" in result.text.lower()
         assert result.buttons is None
 
     async def test_button_text_is_user_friendly(self, orch: Orchestrator) -> None:
         info = VersionInfo(current="1.0.0", latest="1.1.0", update_available=True, summary="Patch")
         with (
             patch("ductor_bot.infra.install.detect_install_mode", return_value="pipx"),
-            patch("ductor_bot.orchestrator.commands.check_pypi", return_value=info),
+            patch(
+                "ductor_bot.orchestrator.commands.make_update_checker", return_value=_checker(info)
+            ),
         ):
             result = await cmd_upgrade(orch, 1, "/upgrade")
 
@@ -75,7 +90,9 @@ class TestCmdUpgrade:
         info = VersionInfo(current="3.5.1", latest="3.5.1", update_available=False, summary="")
         with (
             patch("ductor_bot.infra.install.detect_install_mode", return_value="pip"),
-            patch("ductor_bot.orchestrator.commands.check_pypi", return_value=info),
+            patch(
+                "ductor_bot.orchestrator.commands.make_update_checker", return_value=_checker(info)
+            ),
         ):
             result = await cmd_upgrade(orch, 1, "/upgrade")
 
@@ -86,13 +103,42 @@ class TestCmdUpgrade:
         info = VersionInfo(current="1.0.0", latest="2.0.0", update_available=True, summary="Update")
         with (
             patch("ductor_bot.infra.install.detect_install_mode", return_value="pipx"),
-            patch("ductor_bot.orchestrator.commands.check_pypi", return_value=info),
+            patch(
+                "ductor_bot.orchestrator.commands.make_update_checker", return_value=_checker(info)
+            ),
         ):
             result = await cmd_upgrade(orch, 1, "/upgrade")
 
         all_buttons = [b for row in result.buttons.rows for b in row]
         assert any(b.callback_data == "upg:cl:2.0.0" for b in all_buttons)
         assert any(b.callback_data == "upg:yes:2.0.0" for b in all_buttons)
+
+    async def test_github_source_checks_fork_without_upgrade_button(
+        self,
+        orch: Orchestrator,
+    ) -> None:
+        info = VersionInfo(
+            current="0.19.1",
+            latest="0.19.2",
+            update_available=True,
+            summary="Fork release",
+            source="github",
+            release_url="https://github.com/CuasarN1/reductor/releases/tag/v0.19.2",
+            source_repo="CuasarN1/reductor",
+        )
+        with (
+            patch("ductor_bot.infra.install.detect_install_mode", return_value="pipx"),
+            patch(
+                "ductor_bot.orchestrator.commands.make_update_checker", return_value=_checker(info)
+            ),
+        ):
+            result = await cmd_upgrade(orch, 1, "/upgrade")
+
+        assert "CuasarN1/reductor" in result.text
+        assert result.buttons is not None
+        all_buttons = [b for row in result.buttons.rows for b in row]
+        assert any(b.callback_data == "upg:cl:0.19.2" for b in all_buttons)
+        assert all(not b.callback_data.startswith("upg:yes:") for b in all_buttons)
 
     async def test_dev_mode_rejects_upgrade(self, orch: Orchestrator) -> None:
         with patch("ductor_bot.infra.install.detect_install_mode", return_value="dev"):

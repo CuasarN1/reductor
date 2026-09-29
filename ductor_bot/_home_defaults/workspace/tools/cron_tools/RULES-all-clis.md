@@ -20,8 +20,7 @@ Scripts for creating, editing, listing, and removing scheduled jobs.
      - `opus[1m]` - Opus with Claude Code 1M-context beta
      - `fable` - Latest Fable alias when supported by Claude Code
    - **If Codex:**
-     - `gpt-5.6` - Newest/recommended frontier agentic coding model
-     - `gpt-5.5` - Frontier agentic coding model
+     - `gpt-5.5` - Recommended frontier agentic coding model
      - `gpt-5.4` - Frontier agentic coding model
      - `gpt-5.4-mini` - Smaller, faster frontier coding model
      - `gpt-5.3-codex-spark` - Codex-optimized coding model

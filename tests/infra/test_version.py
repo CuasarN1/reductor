@@ -348,6 +348,30 @@ class TestCheckGithubRelease:
 class TestFetchChangelog:
     """Test GitHub Releases changelog fetching."""
 
+    async def test_defaults_to_reductor_fork(self) -> None:
+        calls: list[str] = []
+        resp = MagicMock()
+        resp.status = 200
+        resp.json = AsyncMock(return_value={"body": "fork notes"})
+
+        @asynccontextmanager
+        async def mock_get(url: str, **_kwargs: object) -> AsyncGenerator[MagicMock, None]:
+            calls.append(url)
+            yield resp
+
+        session = MagicMock()
+        session.get = mock_get
+
+        @asynccontextmanager
+        async def mock_session_cm(**_kwargs: object) -> AsyncGenerator[MagicMock, None]:
+            yield session
+
+        with patch("ductor_bot.infra.version.aiohttp.ClientSession", mock_session_cm):
+            result = await fetch_changelog("1.0.0")
+
+        assert result == "fork notes"
+        assert calls == ["https://api.github.com/repos/CuasarN1/reductor/releases/tags/v1.0.0"]
+
     async def test_returns_body_for_v_prefixed_tag(self) -> None:
         mock = _mock_pypi_session(json_data={"body": "## What's new\n\n- Feature A"})
         with patch("ductor_bot.infra.version.aiohttp.ClientSession", mock):

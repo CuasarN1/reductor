@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING
 
 from ductor_bot.cli.auth import check_all_auth
 from ductor_bot.i18n import t
-from ductor_bot.infra.version import check_pypi, get_current_version
+from ductor_bot.infra.updater import make_update_checker
+from ductor_bot.infra.version import get_current_version
 from ductor_bot.orchestrator.privacy import can_access_global_memory, global_memory_denied_text
 from ductor_bot.orchestrator.registry import OrchestratorResult
 from ductor_bot.orchestrator.selectors.cron_selector import cron_selector_start
@@ -134,12 +135,17 @@ async def cmd_upgrade(_orch: Orchestrator, _key: SessionKey, _text: str) -> Orch
             ),
         )
 
-    info = await check_pypi(fresh=True)
+    checker = make_update_checker(_orch._config, fresh=True)
+    info = await checker()
 
     if info is None:
         return OrchestratorResult(
             text=t("upgrade.pypi_unreachable"),
         )
+
+    source_line = ""
+    if info.source == "github" and info.source_repo:
+        source_line = "\n" + t("upgrade.source_line", source=info.source_repo)
 
     if not info.update_available:
         keyboard = ButtonGrid(
@@ -156,19 +162,22 @@ async def cmd_upgrade(_orch: Orchestrator, _key: SessionKey, _text: str) -> Orch
             text=fmt(
                 t("upgrade.up_to_date_header"),
                 SEP,
-                t("upgrade.up_to_date_body", current=info.current, latest=info.latest),
+                t("upgrade.up_to_date_body", current=info.current, latest=info.latest)
+                + source_line,
             ),
             buttons=keyboard,
         )
 
-    keyboard = ButtonGrid(
-        rows=[
-            [
-                Button(
-                    text=t("upgrade.btn_changelog", version=info.latest),
-                    callback_data=f"upg:cl:{info.latest}",
-                )
-            ],
+    rows = [
+        [
+            Button(
+                text=t("upgrade.btn_changelog", version=info.latest),
+                callback_data=f"upg:cl:{info.latest}",
+            )
+        ],
+    ]
+    if info.source != "github":
+        rows.append(
             [
                 Button(
                     text=t("upgrade.btn_yes"),
@@ -176,14 +185,14 @@ async def cmd_upgrade(_orch: Orchestrator, _key: SessionKey, _text: str) -> Orch
                 ),
                 Button(text=t("upgrade.btn_not_now"), callback_data="upg:no"),
             ],
-        ]
-    )
+        )
+    keyboard = ButtonGrid(rows=rows)
 
     return OrchestratorResult(
         text=fmt(
             t("upgrade.available_header"),
             SEP,
-            t("upgrade.available_body", current=info.current, latest=info.latest),
+            t("upgrade.available_body", current=info.current, latest=info.latest) + source_line,
         ),
         buttons=keyboard,
     )

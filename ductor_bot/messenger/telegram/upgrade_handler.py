@@ -39,7 +39,7 @@ async def on_update_available(bot: TelegramBot, info: VersionInfo) -> None:
             )
         keyboard = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
         source_line = f"\nSource: `{info.source_repo}`" if info.source_repo else ""
-        action_line = "\nUpdate from the configured fork release source; `/upgrade` still checks PyPI."
+        action_line = "\nUse `/upgrade` to check the configured fork release source."
     else:
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
@@ -207,7 +207,12 @@ async def handle_changelog_callback(
             chat_id=chat_id, message_id=message_id, reply_markup=upgrade_keyboard
         )
 
-    body = await fetch_changelog(version)
+    notifications = bot._orch._config.notifications
+    body = await fetch_changelog(
+        version,
+        repo=notifications.update_github_repo,
+        releases_url=notifications.update_github_releases_url,
+    )
     if not body:
         await bot.bot_instance.send_message(
             chat_id,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, Self
 
 from ductor_bot.cli.codex_discovery import CodexModelInfo, discover_codex_models
@@ -11,20 +11,12 @@ from ductor_bot.cli.model_cache import BaseModelCache
 # Hardcoded fallback when discovery and disk cache both fail.
 _FALLBACK_CODEX_MODELS: tuple[CodexModelInfo, ...] = (
     CodexModelInfo(
-        id="gpt-5.6",
-        display_name="GPT-5.6",
-        description="Newest recommended frontier agentic coding model.",
-        supported_efforts=("low", "medium", "high", "xhigh"),
-        default_effort="medium",
-        is_default=True,
-    ),
-    CodexModelInfo(
         id="gpt-5.5",
         display_name="GPT-5.5",
         description="Frontier model for complex coding, research, and real-world work.",
         supported_efforts=("low", "medium", "high", "xhigh"),
         default_effort="medium",
-        is_default=False,
+        is_default=True,
     ),
     CodexModelInfo(
         id="gpt-5.4",
@@ -66,7 +58,7 @@ class CodexModelCache(BaseModelCache):
 
     @classmethod
     async def _discover(cls) -> list[CodexModelInfo]:
-        return cls._merge_known_default(await discover_codex_models())
+        return await discover_codex_models()
 
     @classmethod
     def _empty_models(cls) -> list[CodexModelInfo]:
@@ -75,37 +67,6 @@ class CodexModelCache(BaseModelCache):
     @classmethod
     def _fallback_models(cls) -> list[CodexModelInfo]:
         return list(_FALLBACK_CODEX_MODELS)
-
-    @classmethod
-    def _merge_known_default(cls, models: list[CodexModelInfo]) -> list[CodexModelInfo]:
-        """Add the newest bundled default to old Codex fallback-style caches.
-
-        Older Codex CLIs can fail dynamic discovery, leaving a recent disk cache
-        with the previous bundled model list. In that case keep the cache useful
-        by overlaying the newest known Codex model in memory. Real discovery
-        results are returned by ``_refresh_and_save`` directly and are not
-        modified here.
-        """
-        fallback_default = next((m for m in _FALLBACK_CODEX_MODELS if m.is_default), None)
-        if fallback_default is None:
-            return models
-
-        model_ids = {m.id for m in models}
-        if fallback_default.id in model_ids:
-            return models
-
-        fallback_ids = {m.id for m in _FALLBACK_CODEX_MODELS}
-        if not model_ids.intersection(fallback_ids):
-            return models
-
-        default_ids = {m.id for m in models if m.is_default}
-        prefer_fallback_default = not default_ids or default_ids <= fallback_ids
-        known_model = replace(fallback_default, is_default=prefer_fallback_default)
-        existing_models = [
-            replace(m, is_default=False) if prefer_fallback_default and m.is_default else m
-            for m in models
-        ]
-        return [known_model, *existing_models]
 
     def get_model(self, model_id: str) -> CodexModelInfo | None:
         """Look up model by ID."""
@@ -147,7 +108,7 @@ class CodexModelCache(BaseModelCache):
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> Self:
         """Deserialize from JSON."""
-        models = cls._merge_known_default([
+        models = [
             CodexModelInfo(
                 id=m["id"],
                 display_name=m["display_name"],
@@ -157,7 +118,7 @@ class CodexModelCache(BaseModelCache):
                 is_default=m["is_default"],
             )
             for m in data["models"]
-        ])
+        ]
 
         return cls(
             last_updated=data["last_updated"],

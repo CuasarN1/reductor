@@ -132,7 +132,8 @@ time = "Time: {secs}s"
 [upgrade]
 dev_header = "**Running From Source**"
 dev_body = "Self-upgrade is not available for development installs.\nUpdate with `git pull` in your project directory."
-pypi_unreachable = "Could not reach PyPI to check for updates. Try again later."
+pypi_unreachable = "Could not reach the configured release source to check for updates. Try again later."
+source_line = "Source: `{source}`"
 up_to_date_header = "**Already Up to Date**"
 up_to_date_body = "Installed: `{current}`\nLatest:    `{latest}`\n\nYou're running the latest version."
 available_header = "**Update Available**"
@@ -156,7 +157,7 @@ codex_cache_not_loaded = "Codex Model Cache: Not loaded"
 codex_cache_info = "Codex Model Cache:\n  Last updated: {updated}\n  Models cached: {count}\n  Default model: {default}"
 codex_cli_not_found = "not found"
 codex_cli_unknown = "unknown"
-codex_gpt56_missing = "  GPT-5.6: not detected by local Codex CLI. Update Codex CLI and restart Ductor, or wait for account rollout."
+codex_gpt56_missing = "  GPT-5.6: not exposed by the local Codex CLI/account; it will not be shown unless discovery returns it."
 health_header = "**Multi-Agent Health:**"
 
 # -- Tasks ---------------------------------------------------------------------

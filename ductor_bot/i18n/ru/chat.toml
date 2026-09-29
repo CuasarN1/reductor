@@ -131,7 +131,8 @@ time = "Время: {secs}с"
 [upgrade]
 dev_header = "**Установка из исходников**"
 dev_body = "Автообновление недоступно для dev-установок.\nОбновляй через `git pull` в каталоге проекта."
-pypi_unreachable = "Не удалось связаться с PyPI. Попробуй позже."
+pypi_unreachable = "Не удалось проверить настроенный источник релизов. Попробуй позже."
+source_line = "Источник: `{source}`"
 up_to_date_header = "**Всё актуально**"
 up_to_date_body = "Установлено: `{current}`\nПоследняя:   `{latest}`\n\nУ тебя самая свежая версия."
 available_header = "**Доступно обновление**"
@@ -155,7 +156,7 @@ codex_cache_not_loaded = "Codex Model Cache: Не загружен"
 codex_cache_info = "Codex Model Cache:\n  Обновлён: {updated}\n  Моделей в кэше: {count}\n  Модель по умолчанию: {default}"
 codex_cli_not_found = "не найден"
 codex_cli_unknown = "неизвестно"
-codex_gpt56_missing = "  GPT-5.6: не обнаружена локальным Codex CLI. Обнови Codex CLI и перезапусти Ductor либо дождись rollout для аккаунта."
+codex_gpt56_missing = "  GPT-5.6: не доступна через локальный Codex CLI/аккаунт; модель не будет показана, пока discovery её не вернёт."
 health_header = "**Здоровье Multi-Agent:**"
 
 # -- Задачи --------------------------------------------------------------------

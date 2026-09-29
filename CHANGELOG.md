@@ -4,10 +4,11 @@
 
 ### Fixed
 
-- Codex model discovery results that still look like the older bundled
-  `gpt-5.5`/`gpt-5.4` model set are now overlaid with `gpt-5.6` in ReDuctor's
-  cache, so `/model` shows GPT-5.6 even when the installed Codex CLI has not
-  refreshed its model list yet.
+- `/upgrade` checks the configured ReDuctor GitHub release source instead of
+  PyPI by default.
+- Reverted the unsafe Codex `gpt-5.6` overlay: ReDuctor now trusts local Codex
+  discovery and does not show GPT-5.6 unless the Codex account actually exposes
+  it.
 
 ## v0.19.1 - 2026-07-16
 

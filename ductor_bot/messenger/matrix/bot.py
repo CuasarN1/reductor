@@ -1047,7 +1047,12 @@ class MatrixBot:
                 return
             from ductor_bot.infra.version import fetch_changelog
 
-            body = await fetch_changelog(version)
+            notifications = self._config.notifications
+            body = await fetch_changelog(
+                version,
+                repo=notifications.update_github_repo,
+                releases_url=notifications.update_github_releases_url,
+            )
             if body:
                 await self._send_rich(
                     room_id, f"{t('upgrade_handler.changelog_header', version=version)}\n\n{body}"
