@@ -474,6 +474,12 @@ class TaskHub:
                 prompt=prompt,
                 model_override=entry.model or None,
                 provider_override=entry.provider or None,
+                reasoning_effort_override=thinking or None,
+                model_selection_origin=(
+                    "infrastructure"
+                    if resume_session is not None or not (entry.model or entry.provider)
+                    else "user"
+                ),
                 chat_id=entry.chat_id,
                 topic_id=entry.thread_id,
                 process_label=f"task:{entry.task_id}",

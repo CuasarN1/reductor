@@ -521,8 +521,8 @@ class CLIService:
         if (
             resolved.enabled
             and not resolved.allow_model_switch
-            and request.model_override
-            and not request.model_policy_selected
+            and (request.model_override or request.provider_override)
+            and request.model_selection_origin == "user"
         ):
             return model_switch_denied_text()
         return request_policy_denial_for_policy(

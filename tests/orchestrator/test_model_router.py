@@ -249,4 +249,4 @@ async def test_unqualified_named_session_uses_router(orch: Orchestrator) -> None
     assert submitted.model_override == "gpt-6-astra"
     assert submitted.provider_override == "codex"
     assert submitted.reasoning_effort_override == "high"
-    assert submitted.model_policy_selected is True
+    assert submitted.model_selection_origin == "policy"

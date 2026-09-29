@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from ductor_bot.cli.timeout_controller import TimeoutConfig as TCConfig
 from ductor_bot.cli.timeout_controller import TimeoutController
-from ductor_bot.cli.types import AgentRequest, AgentResponse
+from ductor_bot.cli.types import AgentRequest, AgentResponse, ModelSelectionOrigin
 from ductor_bot.config import NULLISH_TEXT_VALUES, resolve_timeout
 from ductor_bot.i18n import t
 from ductor_bot.infra.inflight import InflightTurn
@@ -106,7 +106,9 @@ async def _prepare_normal(
 
     Returns (request, session) so the caller can update the session after the CLI call.
     """
-    policy_selected = False
+    model_selection_origin: ModelSelectionOrigin = (
+        "user" if model_override is not None else "infrastructure"
+    )
     reasoning_effort_override: str | None = None
     selected = None
     if model_override is None:
@@ -130,7 +132,7 @@ async def _prepare_normal(
     if selected is not None:
         requested_model = selected.model
         req_provider = selected.provider
-        policy_selected = True
+        model_selection_origin = "policy"
         reasoning_effort_override = selected.reasoning_effort
     else:
         requested_model = model_override or orch._config.model
@@ -141,7 +143,7 @@ async def _prepare_normal(
         key,
         provider=req_provider,
         model=req_model,
-        preserve_existing_target=model_override is None and not policy_selected,
+        preserve_existing_target=model_override is None and model_selection_origin != "policy",
     )
     req_model = session.model
     req_provider = session.provider
@@ -196,7 +198,7 @@ async def _prepare_normal(
         model_override=req_model,
         provider_override=req_provider,
         reasoning_effort_override=reasoning_effort_override,
-        model_policy_selected=policy_selected,
+        model_selection_origin=model_selection_origin,
         chat_id=key.chat_id,
         topic_id=key.topic_id,
         user_id=key.user_id,
@@ -825,7 +827,7 @@ async def named_session_flow(  # noqa: PLR0911
         prompt=text,
         model_override=ns.model,
         provider_override=ns.provider,
-        model_policy_selected=True,
+        model_selection_origin="infrastructure",
         chat_id=key.chat_id,
         topic_id=key.topic_id,
         user_id=key.user_id,
@@ -881,7 +883,7 @@ async def named_session_streaming(  # noqa: PLR0911
         prompt=text,
         model_override=ns.model,
         provider_override=ns.provider,
-        model_policy_selected=True,
+        model_selection_origin="infrastructure",
         chat_id=key.chat_id,
         topic_id=key.topic_id,
         user_id=key.user_id,
@@ -991,7 +993,7 @@ async def heartbeat_flow(
         prompt=effective_prompt,
         model_override=req_model,
         provider_override=req_provider,
-        model_policy_selected=True,
+        model_selection_origin="infrastructure",
         chat_id=key.chat_id,
         topic_id=key.topic_id,
         user_id=key.user_id,

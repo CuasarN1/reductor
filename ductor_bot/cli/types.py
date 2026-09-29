@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -12,6 +12,8 @@ if TYPE_CHECKING:
 
 
 _TASK_LABEL_PREFIX = "task:"
+
+ModelSelectionOrigin = Literal["user", "policy", "infrastructure"]
 
 
 def task_id_from_label(process_label: str) -> str:
@@ -68,7 +70,10 @@ class AgentRequest:
     model_override: str | None = None
     provider_override: str | None = None
     reasoning_effort_override: str | None = None
-    model_policy_selected: bool = False
+    # Defaults to the least-trusted origin: callers that pass a model/provider
+    # override must opt in explicitly when the target came from policy or from
+    # persisted infrastructure state rather than from the user.
+    model_selection_origin: ModelSelectionOrigin = "user"
     chat_id: int = 0
     topic_id: int | None = None
     user_id: int | None = None

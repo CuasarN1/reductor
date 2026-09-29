@@ -248,7 +248,7 @@ async def test_default_model_policy_auto_selects_allowed_model(orch: Orchestrato
     request = mock_execute.call_args[0][0]
     assert result.text == "Response text"
     assert request.model_override == "sonnet"
-    assert request.model_policy_selected is True
+    assert request.model_selection_origin == "policy"
 
 
 async def test_user_model_policy_override_allows_owner(orch: Orchestrator) -> None:
@@ -318,6 +318,7 @@ async def test_submit_named_session_passes_user_id_to_background(orch: Orchestra
     submitted = background.submit.call_args[0][0]
     assert task_id == "task-1"
     assert submitted.user_id == 1
+    assert submitted.model_selection_origin == "user"
 
 
 async def test_submit_named_session_auto_selects_policy_model(orch: Orchestrator) -> None:
@@ -338,7 +339,7 @@ async def test_submit_named_session_auto_selects_policy_model(orch: Orchestrator
     submitted = background.submit.call_args[0][0]
     assert task_id == "task-1"
     assert submitted.model_override == "opus"
-    assert submitted.model_policy_selected is True
+    assert submitted.model_selection_origin == "policy"
 
 
 # -- streaming --

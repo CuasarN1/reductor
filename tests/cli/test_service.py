@@ -85,6 +85,118 @@ async def test_execute_rejects_model_policy_violation() -> None:
     mock_create.assert_not_called()
 
 
+async def test_execute_rejects_manual_override_when_switching_is_disabled() -> None:
+    svc = _make_service(
+        model_policy=ModelPolicyConfig(
+            enabled=True,
+            default=ModelPolicyRule(allowed_models=["sonnet"], allow_model_switch=False),
+        )
+    )
+
+    with patch("ductor_bot.cli.service.create_cli") as mock_create:
+        resp = await svc.execute(
+            AgentRequest(
+                prompt="hello",
+                chat_id=1,
+                user_id=99,
+                model_override="sonnet",
+                provider_override="claude",
+            )
+        )
+
+    assert resp.is_error is True
+    assert resp.result == "Manual model selection is disabled for this user."
+    mock_create.assert_not_called()
+
+
+async def test_execute_allows_allowed_infrastructure_override() -> None:
+    svc = _make_service(
+        model_policy=ModelPolicyConfig(
+            enabled=True,
+            default=ModelPolicyRule(allowed_models=["sonnet"], allow_model_switch=False),
+        )
+    )
+    with patch("ductor_bot.cli.service.create_cli") as mock_create:
+        mock_cli = AsyncMock()
+        mock_cli.send.return_value = CLIResponse(result="ok")
+        mock_create.return_value = mock_cli
+
+        resp = await svc.execute(
+            AgentRequest(
+                prompt="resume",
+                chat_id=1,
+                user_id=99,
+                model_override="sonnet",
+                provider_override="claude",
+                model_selection_origin="infrastructure",
+                resume_session="sess-1",
+            )
+        )
+
+    assert resp.is_error is False
+    assert resp.result == "ok"
+    mock_create.assert_called_once()
+
+
+async def test_execute_rejects_disallowed_infrastructure_model() -> None:
+    svc = _make_service(
+        model_policy=ModelPolicyConfig(
+            enabled=True,
+            default=ModelPolicyRule(allowed_models=["sonnet"], allow_model_switch=False),
+        )
+    )
+
+    with patch("ductor_bot.cli.service.create_cli") as mock_create:
+        resp = await svc.execute(
+            AgentRequest(
+                prompt="resume",
+                chat_id=1,
+                user_id=99,
+                model_override="opus",
+                provider_override="claude",
+                model_selection_origin="infrastructure",
+                resume_session="sess-1",
+            )
+        )
+
+    assert resp.is_error is True
+    assert "Model `opus` is not allowed" in resp.result
+    mock_create.assert_not_called()
+
+
+async def test_execute_rejects_disallowed_infrastructure_reasoning_effort() -> None:
+    svc = _make_service(
+        default_model="gpt-6-sol",
+        provider="codex",
+        model_policy=ModelPolicyConfig(
+            enabled=True,
+            default=ModelPolicyRule(
+                allowed_models=["gpt-6-sol"],
+                allowed_reasoning_efforts=["low"],
+                allow_model_switch=False,
+            ),
+        ),
+    )
+
+    with patch("ductor_bot.cli.service.create_cli") as mock_create:
+        resp = await svc.execute(
+            AgentRequest(
+                prompt="resume",
+                chat_id=1,
+                user_id=99,
+                model_override="gpt-6-sol",
+                provider_override="codex",
+                reasoning_effort_override="high",
+                model_selection_origin="infrastructure",
+                resume_session="sess-1",
+            )
+        )
+
+    assert resp.is_error is True
+    assert "Reasoning effort `high` is not allowed" in resp.result
+    mock_create.assert_not_called()
+
+
 async def test_execute_allows_policy_admin_without_explicit_wildcard_rule() -> None:
     svc = _make_service(
         model_policy=ModelPolicyConfig(

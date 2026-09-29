@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 
+from ductor_bot.cli.types import ModelSelectionOrigin
+
 
 @dataclass(slots=True)
 class BackgroundSubmit:
@@ -16,7 +18,7 @@ class BackgroundSubmit:
     thread_id: int | None
     user_id: int | None = None
     reasoning_effort_override: str = ""
-    model_policy_selected: bool = False
+    model_selection_origin: ModelSelectionOrigin = "user"
     session_name: str = ""
     resume_session_id: str = ""
     provider_override: str = ""
@@ -34,7 +36,7 @@ class BackgroundTask:
     thread_id: int | None
     user_id: int | None
     reasoning_effort: str
-    model_policy_selected: bool
+    model_selection_origin: ModelSelectionOrigin
     provider: str
     model: str
     submitted_at: float

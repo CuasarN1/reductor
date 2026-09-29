@@ -14,6 +14,7 @@ from ductor_bot.background import (
 )
 from ductor_bot.cli.process_registry import ProcessRegistry
 from ductor_bot.cli.service import CLIService, CLIServiceConfig
+from ductor_bot.cli.types import ModelSelectionOrigin
 from ductor_bot.config import AgentConfig
 from ductor_bot.cron.manager import CronManager
 from ductor_bot.errors import (
@@ -760,7 +761,9 @@ class Orchestrator:
         user_id = (
             request.user_id if request.user_id is not None else (chat_id if chat_id > 0 else None)
         )
-        model_policy_selected = False
+        model_selection_origin: ModelSelectionOrigin = (
+            "user" if request.provider_override or request.model_override else "infrastructure"
+        )
         selected = None
         if not request.provider_override and not request.model_override:
             selected = await self.select_execution_target(
@@ -776,7 +779,7 @@ class Orchestrator:
             model_name = selected.model
             provider_name = selected.provider
             reasoning_effort = selected.reasoning_effort
-            model_policy_selected = True
+            model_selection_origin = "policy"
         else:
             model_name, provider_name = self.resolve_runtime_target(self._config.model)
             reasoning_effort = None
@@ -810,7 +813,7 @@ class Orchestrator:
             thread_id=request.thread_id,
             user_id=request.user_id,
             reasoning_effort_override=reasoning_effort or "",
-            model_policy_selected=model_policy_selected,
+            model_selection_origin=model_selection_origin,
             session_name=ns.name,
             provider_override=provider_name,
             model_override=model_name,
@@ -862,7 +865,7 @@ class Orchestrator:
             message_id=message_id,
             thread_id=thread_id,
             user_id=user_id,
-            model_policy_selected=True,
+            model_selection_origin="infrastructure",
             session_name=session_name,
             resume_session_id=ns.session_id,
             provider_override=ns.provider,

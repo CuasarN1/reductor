@@ -60,6 +60,7 @@ def test_agent_request_defaults() -> None:
     assert req.append_system_prompt is None
     assert req.model_override is None
     assert req.provider_override is None
+    assert req.model_selection_origin == "user"
     assert req.chat_id == 0
     assert req.process_label == "main"
     assert req.resume_session is None

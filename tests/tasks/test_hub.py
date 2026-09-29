@@ -109,6 +109,53 @@ class TestSubmit:
 
         await hub.shutdown()
 
+    async def test_explicit_target_is_user_origin_and_reasoning_is_forwarded(
+        self, registry: TaskRegistry, tmp_path: Path
+    ) -> None:
+        cli = _make_cli_service()
+        hub = TaskHub(
+            registry,
+            MagicMock(workspace=tmp_path),
+            cli_service=cli,
+            config=_make_config(),
+        )
+        hub.set_result_handler("main", AsyncMock())
+
+        submit = _submit()
+        submit.provider_override = "claude"
+        submit.model_override = "opus"
+        submit.thinking_override = "high"
+        hub.submit(submit)
+        await asyncio.sleep(0.1)
+
+        request = cli.execute.call_args.args[0]
+        assert request.model_selection_origin == "user"
+        assert request.reasoning_effort_override == "high"
+
+        await hub.shutdown()
+
+    async def test_implicit_target_is_infrastructure_origin(
+        self, registry: TaskRegistry, tmp_path: Path
+    ) -> None:
+        cli = _make_cli_service()
+        hub = TaskHub(
+            registry,
+            MagicMock(workspace=tmp_path),
+            cli_service=cli,
+            config=_make_config(),
+        )
+        hub.set_result_handler("main", AsyncMock())
+
+        hub.submit(_submit())
+        await asyncio.sleep(0.1)
+
+        request = cli.execute.call_args.args[0]
+        assert request.model_override is None
+        assert request.provider_override is None
+        assert request.model_selection_origin == "infrastructure"
+
+        await hub.shutdown()
+
 
 class TestRunAndDeliver:
     async def test_delivers_success_result(self, registry: TaskRegistry, tmp_path: Path) -> None:
@@ -753,18 +800,33 @@ class TestResume:
     async def test_resume_uses_original_provider_model(
         self, registry: TaskRegistry, tmp_path: Path
     ) -> None:
-        hub = self._hub(registry, tmp_path)
+        cli = _make_cli_service()
+        hub = TaskHub(
+            registry,
+            MagicMock(workspace=tmp_path),
+            cli_service=cli,
+            config=_make_config(),
+        )
+        hub.set_result_handler("main", AsyncMock())
         entry = registry.create(_submit(), "codex", "gpt-4.1", thinking="high")
         registry.update_status(entry.task_id, "done", session_id="codex-sess")
 
         resumed_id = hub.resume(entry.task_id, "follow up")
         assert resumed_id == entry.task_id
+        await asyncio.sleep(0.1)
 
         updated = registry.get(entry.task_id)
         assert updated is not None
         assert updated.provider == "codex"
         assert updated.model == "gpt-4.1"
         assert updated.thinking == "high"
+        request = cli.execute.call_args.args[0]
+        assert request.provider_override == "codex"
+        assert request.model_override == "gpt-4.1"
+        assert request.reasoning_effort_override == "high"
+        assert request.model_selection_origin == "infrastructure"
+
+        await hub.shutdown()
 
     def test_resume_fails_if_no_session_id(self, registry: TaskRegistry, tmp_path: Path) -> None:
         hub = self._hub(registry, tmp_path)
