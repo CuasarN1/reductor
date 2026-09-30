@@ -12,6 +12,7 @@ from ductor_bot.cli.param_resolver import TaskOverrides
 from ductor_bot.infra.base_task_observer import BaseTaskObserver
 from ductor_bot.infra.file_watcher import FileWatcher
 from ductor_bot.infra.task_runner import execute_in_task_folder
+from ductor_bot.session import SessionKey
 from ductor_bot.utils.quiet_hours import check_quiet_hour
 from ductor_bot.webhook.models import WebhookResult, render_template
 from ductor_bot.webhook.server import WebhookServer
@@ -286,6 +287,24 @@ class WebhookObserver(BaseTaskObserver):
             )
 
         dependency = hook.dependency if hook else None
+
+        try:
+            overrides = await self.route_execution_overrides(
+                SessionKey(
+                    chat_id=hook.user_id if hook and hook.user_id is not None else 0,
+                    user_id=hook.user_id if hook else None,
+                ),
+                f"{title}\n{prompt}",
+                overrides,
+            )
+        except ValueError as exc:
+            return WebhookResult(
+                hook_id=hook_id,
+                hook_title=title,
+                mode="cron_task",
+                result_text=str(exc),
+                status="error:model_policy",
+            )
 
         result = await execute_in_task_folder(
             self,

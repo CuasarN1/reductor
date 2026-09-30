@@ -319,6 +319,42 @@ async def test_submit_named_session_passes_user_id_to_background(orch: Orchestra
     assert task_id == "task-1"
     assert submitted.user_id == 1
     assert submitted.model_selection_origin == "user"
+    named = orch.get_named_session(-100, _session_name)
+    assert named is not None
+    assert named.user_id == 1
+
+
+async def test_recovered_named_followup_uses_persisted_creator_identity(
+    orch: Orchestrator,
+) -> None:
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        default=ModelPolicyRule(allowed_models=["sonnet"]),
+        users={"42": ModelPolicyRule(allowed_models=["opus"], allow_model_switch=True)},
+    )
+    background = MagicMock()
+    background.submit.return_value = "task-2"
+    orch._observers.background = background
+    ns = orch._named_sessions.create(
+        -100,
+        "claude",
+        "opus",
+        "Run this",
+        user_id=42,
+    )
+    orch._named_sessions.update_after_response(-100, ns.name, "session-1")
+
+    await orch.submit_named_followup_bg(
+        -100,
+        ns.name,
+        "continue",
+        message_id=0,
+        thread_id=None,
+    )
+
+    submitted = background.submit.call_args.args[0]
+    assert submitted.user_id == 42
+    assert submitted.model_override == "opus"
 
 
 async def test_submit_named_session_auto_selects_policy_model(orch: Orchestrator) -> None:

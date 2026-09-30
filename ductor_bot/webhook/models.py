@@ -47,6 +47,7 @@ class WebhookEntry:
 
     # Optional dependency for sequential execution
     dependency: str | None = None
+    user_id: int | None = None
 
     def __post_init__(self) -> None:
         if not self.created_at:
@@ -81,6 +82,7 @@ class WebhookEntry:
             "quiet_start": self.quiet_start,
             "quiet_end": self.quiet_end,
             "dependency": self.dependency,
+            "user_id": self.user_id,
         }
 
     @classmethod
@@ -113,6 +115,7 @@ class WebhookEntry:
             quiet_start=data.get("quiet_start"),
             quiet_end=data.get("quiet_end"),
             dependency=data.get("dependency"),
+            user_id=data.get("user_id"),
         )
 
 

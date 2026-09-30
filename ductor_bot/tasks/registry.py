@@ -124,6 +124,9 @@ class TaskRegistry:
             tasks_dir=str(resolved_dir),
             thread_id=submit.thread_id,
             priority=normalise_priority(priority or submit.priority),
+            user_id=submit.user_id,
+            transport=submit.transport,
+            model_selection_origin=submit.model_selection_origin or "infrastructure",
         )
         self._entries[task_id] = entry
 

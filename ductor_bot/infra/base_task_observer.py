@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from ductor_bot.cli.param_resolver import TaskOverrides, resolve_cli_config
+from ductor_bot.session import SessionKey
 
 if TYPE_CHECKING:
     from ductor_bot.cli.codex_cache import CodexModelCache
@@ -15,6 +17,11 @@ if TYPE_CHECKING:
     from ductor_bot.workspace.paths import DuctorPaths
 
 logger = logging.getLogger(__name__)
+
+TaskRouteCallback = Callable[
+    [SessionKey, str, TaskOverrides],
+    Awaitable[TaskOverrides],
+]
 
 
 class BaseTaskObserver:
@@ -35,6 +42,22 @@ class BaseTaskObserver:
         self._paths = paths
         self._config = config
         self._codex_cache = codex_cache
+        self._route_execution: TaskRouteCallback | None = None
+
+    def set_execution_router(self, callback: TaskRouteCallback) -> None:
+        """Install the orchestrator-owned policy/router callback."""
+        self._route_execution = callback
+
+    async def route_execution_overrides(
+        self,
+        key: SessionKey,
+        prompt: str,
+        overrides: TaskOverrides,
+    ) -> TaskOverrides:
+        """Resolve unpinned work once; preserve explicit task configuration pins."""
+        if self._route_execution is None:
+            return overrides
+        return await self._route_execution(key, prompt, overrides)
 
     def resolve_execution_config(
         self,

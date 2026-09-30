@@ -76,6 +76,13 @@ class TestCronJob:
         restored = CronJob.from_dict(job.to_dict())
         assert restored.silent_on_success is True
 
+    def test_policy_owner_identity_roundtrip(self) -> None:
+        job = _make_job(chat_id=-100, topic_id=7, user_id=42)
+        restored = CronJob.from_dict(job.to_dict())
+        assert restored.chat_id == -100
+        assert restored.topic_id == 7
+        assert restored.user_id == 42
+
     def test_auto_created_at(self) -> None:
         job = _make_job()
         assert job.created_at != ""

@@ -92,6 +92,13 @@ def test_docker_wrap_injects_chat_id() -> None:
     assert "DUCTOR_CHAT_ID=999" in result_cmd
 
 
+def test_docker_wrap_injects_originating_user_id() -> None:
+    cmd = ["codex", "exec"]
+    cfg = CLIConfig(docker_container="box", chat_id=-100, user_id=42, working_dir="/w")
+    result_cmd, _ = docker_wrap(cmd, cfg)
+    assert "DUCTOR_USER_ID=42" in result_cmd
+
+
 def test_docker_wrap_extra_env() -> None:
     cmd = ["gemini"]
     cfg = CLIConfig(docker_container="box", chat_id=1, working_dir="/w")

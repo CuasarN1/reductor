@@ -619,13 +619,22 @@ Rules:
 - `admin_user_ids` lists users who may manage access through `/access`. Policy admins
   and the first `allowed_user_ids` owner always have the full locally available model
   and reasoning-effort pool, regardless of default or per-user restrictions.
-- `router.enabled=true` enables two-stage routing for ordinary messages and new,
-  unqualified `/session <prompt>` requests. A separate stateless call to
+- `router.enabled=true` enables two-stage routing for ordinary messages, new
+  unqualified `/session <prompt>` requests, unpinned `task_tools` work, and
+  unpinned cron/webhook task executions. A separate stateless call to
   `router.provider` / `router.model` classifies the request, then the chosen execution
   model handles it in the normal user session. Once an execution session has history,
   follow-up candidates are pinned to its provider/model (the router may still tune
   Codex reasoning effort), so context is not fragmented and persistent `/model`
   changes remain in effect. The classification session ID is never saved or reused.
+- Task and named-session resumes keep the persisted provider/model because provider
+  session IDs are not portable. The router may re-select only a supported, allowed
+  Codex reasoning effort; if routing fails, the persisted effort is retained.
+- A cron/webhook entry with `provider` or `model` keeps that provider/model pinned.
+  Its explicitly configured `reasoning_effort` is also preserved; when Codex effort
+  is omitted, the router may tune effort without changing the pinned model. An entry
+  with no provider/model is fully routed on each fresh one-shot run. Both forms still
+  pass the effective allowlists; infrastructure pins never bypass policy.
 - The router receives only authenticated providers and locally known/discovered models.
   Non-admin candidates are additionally limited by their effective `allowed_models`
   and `allowed_reasoning_efforts`; admins receive the unrestricted available pool.
@@ -645,7 +654,11 @@ Rules:
   selector callbacks, `@model`, and `/session @provider/model` are rejected. Explicit
   authorized overrides still win over automatic routing. The setting does not disable
   the LLM router for ordinary messages.
-- Enforcement happens in `/model`, inline selector callbacks, `@model` directives, `/session`, named-session follow-ups, and `CLIService`.
+- Enforcement happens in `/model`, inline selector callbacks, `@model` directives,
+  `/session`, named-session follow-ups, `task_tools`, cron/webhook execution, and
+  `CLIService`. Task-tool calls propagate the originating user identity, including
+  the sender ID for Telegram group messages; a policy/router-selected target is
+  marked as infrastructure/policy selection rather than a manual model switch.
 
 Bot access commands:
 

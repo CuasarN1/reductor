@@ -143,6 +143,8 @@ class NamedSession:
     message_count: int = 0
     last_prompt: str = ""
     transport: str = "tg"
+    reasoning_effort: str = ""
+    user_id: int | None = None
 
 
 def _session_from_dict(data: dict[str, Any]) -> NamedSession:
@@ -159,6 +161,8 @@ def _session_from_dict(data: dict[str, Any]) -> NamedSession:
         message_count=int(data.get("message_count", 0)),
         last_prompt=str(data.get("last_prompt", data.get("prompt_preview", ""))),
         transport=str(data.get("transport", "tg")),
+        reasoning_effort=str(data.get("reasoning_effort", "")),
+        user_id=(int(data["user_id"]) if data.get("user_id") is not None else None),
     )
 
 
@@ -200,6 +204,9 @@ class NamedSessionRegistry:
                     created_at=ns.created_at,
                     message_count=ns.message_count,
                     last_prompt=ns.last_prompt,
+                    transport=ns.transport,
+                    reasoning_effort=ns.reasoning_effort,
+                    user_id=ns.user_id,
                 )
                 ns.status = "idle"
             self._sessions[(ns.chat_id, ns.name)] = ns
@@ -210,12 +217,16 @@ class NamedSessionRegistry:
         entries = [asdict(ns) for ns in self._sessions.values() if ns.status != "ended"]
         atomic_json_save(self._path, {"sessions": entries})
 
-    def create(
+    def create(  # noqa: PLR0913
         self,
         chat_id: int,
         provider: str,
         model: str,
         prompt_preview: str,
+        *,
+        transport: str = "tg",
+        reasoning_effort: str = "",
+        user_id: int | None = None,
     ) -> NamedSession:
         """Create a new named session. Raises ValueError if limit exceeded."""
         active = self.active_names(chat_id)
@@ -233,6 +244,9 @@ class NamedSessionRegistry:
             prompt_preview=prompt_preview[:60],
             status="running",
             created_at=time.time(),
+            transport=transport,
+            reasoning_effort=reasoning_effort,
+            user_id=user_id,
         )
         self._sessions[(chat_id, name)] = session
         self._persist()
@@ -311,6 +325,14 @@ class NamedSessionRegistry:
             return
         ns.status = "running"
         ns.last_prompt = prompt[:4000]
+        self._persist()
+
+    def update_reasoning_effort(self, chat_id: int, name: str, effort: str) -> None:
+        """Persist the selected Codex effort for future session resumes."""
+        ns = self._sessions.get((chat_id, name))
+        if ns is None or ns.reasoning_effort == effort:
+            return
+        ns.reasoning_effort = effort
         self._persist()
 
     def pop_recovered_running(self, chat_id: int | None = None) -> list[NamedSession]:

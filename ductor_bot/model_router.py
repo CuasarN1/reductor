@@ -47,6 +47,7 @@ async def classify_model_target(  # noqa: PLR0913
     *,
     chat_id: int,
     topic_id: int | None,
+    user_id: int | None,
     transport: str,
 ) -> SelectedModelTarget | None:
     """Ask the configured stateless router to select an allowed target.
@@ -79,6 +80,7 @@ async def classify_model_target(  # noqa: PLR0913
         reasoning_effort_override=router.reasoning_effort,
         chat_id=chat_id,
         topic_id=topic_id,
+        user_id=user_id,
         transport=transport,
         process_label="model-router",
         timeout_seconds=router.timeout_seconds,

@@ -5,12 +5,17 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from ductor_bot.cli.codex_cache import CodexModelCache
 from ductor_bot.cli.codex_discovery import CodexModelInfo
+from ductor_bot.cli.param_resolver import TaskOverrides
 from ductor_bot.cli.types import AgentResponse
 from ductor_bot.config import ModelPolicyConfig, ModelPolicyRule, ModelRouterConfig
+from ductor_bot.model_policy import SelectedModelTarget
 from ductor_bot.orchestrator.core import NamedSessionRequest, Orchestrator
 from ductor_bot.session import SessionKey
+from ductor_bot.tasks.models import TaskSubmit
 
 
 def _codex_model(model_id: str) -> CodexModelInfo:
@@ -44,7 +49,7 @@ async def test_router_only_receives_non_admin_policy_candidates(orch: Orchestrat
         router=ModelRouterConfig(enabled=True),
         default=ModelPolicyRule(
             allowed_models=["gpt-6-sol"],
-            allowed_reasoning_efforts=["medium"],
+            allowed_reasoning_efforts=["low", "medium"],
             allow_model_switch=True,
         ),
     )
@@ -68,7 +73,7 @@ async def test_router_only_receives_non_admin_policy_candidates(orch: Orchestrat
             "provider": "codex",
             "model": "gpt-6-sol",
             "description": "",
-            "reasoning_efforts": ["medium"],
+            "reasoning_efforts": ["low", "medium"],
         }
     ]
 
@@ -238,7 +243,7 @@ async def test_unqualified_named_session_uses_router(orch: Orchestrator) -> None
     background.submit.return_value = "task-1"
     orch._observers.background = background
 
-    task_id, _name = await orch.submit_named_session(
+    task_id, name = await orch.submit_named_session(
         10,
         "Do a difficult review",
         NamedSessionRequest(message_id=1, thread_id=None, user_id=10),
@@ -250,3 +255,164 @@ async def test_unqualified_named_session_uses_router(orch: Orchestrator) -> None
     assert submitted.provider_override == "codex"
     assert submitted.reasoning_effort_override == "high"
     assert submitted.model_selection_origin == "policy"
+    named = orch.get_named_session(10, name)
+    assert named is not None
+    assert named.reasoning_effort == "high"
+
+
+async def test_task_infrastructure_override_obeys_allowlist_not_manual_switch(
+    orch: Orchestrator,
+) -> None:
+    _enable_codex_inventory(orch)
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        router=ModelRouterConfig(enabled=True),
+        default=ModelPolicyRule(
+            allowed_models=["gpt-6-sol"],
+            allowed_reasoning_efforts=["medium"],
+            allow_model_switch=False,
+        ),
+    )
+    orch._cli_service.execute_router = AsyncMock()
+    submit = TaskSubmit(
+        chat_id=-100,
+        prompt="review this",
+        message_id=0,
+        thread_id=7,
+        parent_agent="main",
+        model_override="gpt-6-sol",
+        thinking_override="medium",
+        user_id=42,
+        model_selection_origin="infrastructure",
+    )
+
+    selected = await orch.route_task_submit(submit, None)
+
+    assert selected.model == "gpt-6-sol"
+    assert selected.reasoning_effort == "medium"
+    orch._cli_service.execute_router.assert_not_awaited()
+
+
+async def test_task_override_uses_originating_user_policy(orch: Orchestrator) -> None:
+    _enable_codex_inventory(orch)
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        router=ModelRouterConfig(enabled=True),
+        default=ModelPolicyRule(allowed_models=["gpt-6-luna"], allow_model_switch=False),
+        users={
+            "42": ModelPolicyRule(
+                allowed_models=["gpt-6-sol"],
+                allowed_reasoning_efforts=["medium"],
+                allow_model_switch=False,
+            )
+        },
+    )
+    submit = TaskSubmit(
+        chat_id=-100,
+        prompt="review this",
+        message_id=0,
+        thread_id=None,
+        parent_agent="main",
+        model_override="gpt-6-astra",
+        thinking_override="medium",
+        user_id=42,
+        model_selection_origin="infrastructure",
+    )
+
+    with pytest.raises(ValueError, match="not allowed"):
+        await orch.route_task_submit(submit, None)
+
+
+async def test_user_origin_override_still_respects_manual_switch_policy(
+    orch: Orchestrator,
+) -> None:
+    _enable_codex_inventory(orch)
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        default=ModelPolicyRule(
+            allowed_models=["gpt-6-sol"],
+            allowed_reasoning_efforts=["medium"],
+            allow_model_switch=False,
+        ),
+    )
+    submit = TaskSubmit(
+        chat_id=-100,
+        prompt="review this",
+        message_id=0,
+        thread_id=None,
+        parent_agent="main",
+        model_override="gpt-6-sol",
+        thinking_override="medium",
+        user_id=42,
+        model_selection_origin="user",
+    )
+
+    with pytest.raises(ValueError, match="Manual model selection"):
+        await orch.route_task_submit(submit, None)
+
+
+async def test_unpinned_cron_routes_but_pinned_cron_skips_classifier(
+    orch: Orchestrator,
+) -> None:
+    _enable_codex_inventory(orch)
+    orch._config.model_policy = ModelPolicyConfig(
+        router=ModelRouterConfig(enabled=True),
+    )
+    orch._cli_service.execute_router = AsyncMock(
+        return_value=AgentResponse(result='{"candidate_id":"c0","reasoning_effort":"low"}')
+    )
+    key = SessionKey(chat_id=42, user_id=42)
+
+    routed = await orch.route_task_overrides(key, "small recurring check", TaskOverrides())
+    pinned = await orch.route_task_overrides(
+        key,
+        "deep review",
+        TaskOverrides(
+            provider="codex",
+            model="gpt-6-sol",
+            reasoning_effort="high",
+            cli_parameters=["--flag"],
+        ),
+    )
+    pinned_with_routed_effort = await orch.route_task_overrides(
+        key,
+        "deep review",
+        TaskOverrides(provider="codex", model="gpt-6-sol"),
+    )
+
+    assert routed.model == "gpt-6-luna"
+    assert routed.reasoning_effort == "low"
+    assert pinned == TaskOverrides(
+        provider="codex",
+        model="gpt-6-sol",
+        reasoning_effort="high",
+        cli_parameters=["--flag"],
+    )
+    assert pinned_with_routed_effort.model == "gpt-6-sol"
+    assert pinned_with_routed_effort.reasoning_effort == "low"
+    assert orch._cli_service.execute_router.await_count == 2
+    pinned_payload = json.loads(orch._cli_service.execute_router.await_args_list[1].args[0].prompt)
+    assert [item["model"] for item in pinned_payload["candidates"]] == ["gpt-6-sol"]
+
+
+async def test_resume_without_router_keeps_model_and_selects_allowed_effort(
+    orch: Orchestrator,
+) -> None:
+    _enable_codex_inventory(orch)
+    orch._config.model_policy = ModelPolicyConfig(
+        enabled=True,
+        router=ModelRouterConfig(enabled=False),
+        default=ModelPolicyRule(
+            allowed_models=["gpt-6-sol"],
+            allowed_reasoning_efforts=["low"],
+            allow_model_switch=False,
+        ),
+    )
+
+    selected = await orch.resolve_policy_execution_target(
+        SessionKey(chat_id=-100, user_id=42),
+        "continue",
+        session_target=SelectedModelTarget("gpt-6-sol", "codex", "high"),
+    )
+
+    assert selected == SelectedModelTarget("gpt-6-sol", "codex", "low")

@@ -21,6 +21,7 @@ from ductor_bot.infra.base_task_observer import BaseTaskObserver
 from ductor_bot.infra.file_watcher import FileWatcher
 from ductor_bot.infra.task_runner import execute_in_task_folder
 from ductor_bot.log_context import set_log_context
+from ductor_bot.session import SessionKey
 from ductor_bot.utils.quiet_hours import check_quiet_hour
 
 if TYPE_CHECKING:
@@ -471,7 +472,7 @@ class CronObserver(BaseTaskObserver):
         finally:
             self._executing.discard(job_id)
 
-    async def _execute_job_inner(
+    async def _execute_job_inner(  # noqa: C901
         self,
         job_id: str,
         instruction: str,
@@ -499,6 +500,30 @@ class CronObserver(BaseTaskObserver):
             reasoning_effort=job.reasoning_effort if job else None,
             cli_parameters=job.cli_parameters if job else [],
         )
+        try:
+            overrides = await self.route_execution_overrides(
+                SessionKey(
+                    chat_id=job.chat_id if job else 0,
+                    topic_id=job.topic_id if job else None,
+                    user_id=job.user_id if job else None,
+                    transport=job.transport if job else "tg",
+                ),
+                "\n".join(
+                    part
+                    for part in (
+                        job.title if job else job_id,
+                        job.description if job else "",
+                        instruction,
+                    )
+                    if part
+                ),
+                overrides,
+            )
+        except ValueError as exc:
+            status = "error:model_policy"
+            await self._deliver_result(job_id, job_title, str(exc), status, routing)
+            self._manager.update_run_status(job_id, status=status)
+            return
 
         result = await execute_in_task_folder(
             self,

@@ -28,6 +28,14 @@ from ductor_bot.infra.process_tree import force_kill_process_tree
 logger = logging.getLogger(__name__)
 
 
+def _set_optional_env(env: dict[str, str], key: str, value: str | None) -> None:
+    """Set one scoped Ductor variable or remove a stale inherited value."""
+    if value is None:
+        env.pop(key, None)
+    else:
+        env[key] = value
+
+
 def build_subprocess_env(config: CLIConfig) -> dict[str, str] | None:
     """Build environment dict with agent identification vars.
 
@@ -54,13 +62,23 @@ def build_subprocess_env(config: CLIConfig) -> dict[str, str] | None:
     env["DUCTOR_AGENT_NAME"] = config.agent_name
     env["DUCTOR_AGENT_ROLE"] = "main" if config.agent_name == "main" else "sub"
     env["DUCTOR_INTERAGENT_PORT"] = str(config.interagent_port)
-    if config.chat_id:
-        env["DUCTOR_CHAT_ID"] = str(config.chat_id)
-    if config.topic_id:
-        env["DUCTOR_TOPIC_ID"] = str(config.topic_id)
+    _set_optional_env(env, "DUCTOR_CHAT_ID", str(config.chat_id) if config.chat_id else None)
+    _set_optional_env(
+        env,
+        "DUCTOR_TOPIC_ID",
+        str(config.topic_id) if config.topic_id else None,
+    )
+    _set_optional_env(
+        env,
+        "DUCTOR_USER_ID",
+        str(config.user_id) if config.user_id is not None else None,
+    )
     env["DUCTOR_TRANSPORT"] = config.transport
-    if task_id := task_id_from_label(config.process_label):
-        env["DUCTOR_TASK_ID"] = task_id
+    _set_optional_env(
+        env,
+        "DUCTOR_TASK_ID",
+        task_id_from_label(config.process_label) or None,
+    )
     if config.transcribe_command:
         env["DUCTOR_TRANSCRIBE_COMMAND"] = config.transcribe_command
     if config.video_transcribe_command:

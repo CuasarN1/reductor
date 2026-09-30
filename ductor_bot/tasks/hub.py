@@ -6,9 +6,12 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from ductor_bot.model_policy import SelectedModelTarget
 from ductor_bot.tasks.models import (
     TaskEntry,
     TaskInFlight,
@@ -34,6 +37,10 @@ _MAINTENANCE_INTERVAL = 5 * 3600  # 5 hours
 
 TaskResultCallback = Callable[[TaskResult], Awaitable[None]]
 QuestionHandler = Callable[[str, str, str, int, int | None], Awaitable[None]]
+TaskRouteHandler = Callable[
+    [TaskSubmit, SelectedModelTarget | None],
+    Awaitable[SelectedModelTarget],
+]
 # QuestionHandler(task_id, question, prompt_preview, chat_id, thread_id) -> None
 
 TASK_PROMPT_SUFFIX = """
@@ -89,6 +96,11 @@ class TaskHub:
         self._in_flight: dict[str, TaskInFlight] = {}
         self._result_handlers: dict[str, TaskResultCallback] = {}
         self._question_handlers: dict[str, QuestionHandler] = {}
+        self._route_handlers: dict[str, TaskRouteHandler] = {}
+        # Routing awaits a classifier call before task state is created.  Keep
+        # that await atomic per capacity bucket/task so concurrent requests do
+        # not both spend classifier tokens and then race on submit/resume.
+        self._routing_locks: dict[tuple[str, int | str], tuple[asyncio.Lock, int]] = {}
         self._agent_chat_ids: dict[str, int] = {}
         self._maintenance_task: asyncio.Task[None] | None = None
         # #92: registry used to kill task subprocess trees on cancel. A single
@@ -118,6 +130,10 @@ class TaskHub:
     def set_question_handler(self, agent_name: str, handler: QuestionHandler) -> None:
         """Register handler for task-agent questions (ask_parent)."""
         self._question_handlers[agent_name] = handler
+
+    def set_route_handler(self, agent_name: str, handler: TaskRouteHandler) -> None:
+        """Register the agent-owned policy/router resolver for task execution."""
+        self._route_handlers[agent_name] = handler
 
     def set_cli_service(self, agent_name: str, cli: CLIService) -> None:
         """Register a per-agent CLI service for task execution."""
@@ -159,33 +175,88 @@ class TaskHub:
             msg = "CLIService not available"
             raise ValueError(msg)
 
+    def _resolve_submit_chat_id(self, submit: TaskSubmit) -> None:
+        """Fill CLI-submitted tasks with their parent agent's primary chat."""
+        if submit.chat_id:
+            return
+        resolved = self._agent_chat_ids.get(submit.parent_agent, 0)
+        if resolved:
+            submit.chat_id = resolved
+
+    @asynccontextmanager
+    async def _routing_lock(self, key: tuple[str, int | str]) -> AsyncIterator[None]:
+        """Serialize one routing bucket and discard its lock after the last waiter."""
+        lock, users = self._routing_locks.get(key, (asyncio.Lock(), 0))
+        self._routing_locks[key] = (lock, users + 1)
+        try:
+            async with lock:
+                yield
+        finally:
+            current_lock, current_users = self._routing_locks[key]
+            if current_users == 1:
+                del self._routing_locks[key]
+            else:
+                self._routing_locks[key] = (current_lock, current_users - 1)
+
+    async def submit_routed(self, submit: TaskSubmit) -> str:
+        """Policy-route a new task exactly once, then create and spawn it."""
+        self._check_enabled()
+        self._resolve_submit_chat_id(submit)
+        async with self._routing_lock(("submit", submit.chat_id)):
+            self._check_submit_capacity(submit)
+            handler = self._route_handlers.get(submit.parent_agent)
+            if handler is None:
+                msg = f"Task routing unavailable for agent '{submit.parent_agent}'"
+                raise ValueError(msg)
+
+            had_explicit_target = bool(submit.provider_override or submit.model_override)
+            selected = await handler(submit, None)
+            origin = submit.model_selection_origin or (
+                "user" if had_explicit_target else "infrastructure"
+            )
+            routed = replace(
+                submit,
+                provider_override=selected.provider,
+                model_override=selected.model,
+                thinking_override=selected.reasoning_effort or "",
+                model_selection_origin=(origin if had_explicit_target else "policy"),
+            )
+            return self.submit(routed)
+
+    def _check_submit_capacity(self, submit: TaskSubmit) -> None:
+        """Reject capped work before policy routing can spend classifier tokens."""
+        priority = normalise_priority(submit.priority)
+        if priority == "interactive":
+            return
+        active = sum(
+            1
+            for task in self._in_flight.values()
+            if task.entry.chat_id == submit.chat_id
+            and task.asyncio_task
+            and not task.asyncio_task.done()
+            and task.entry.priority != "interactive"
+        )
+        if active >= self._config.max_parallel:
+            msg = f"Too many background tasks ({self._config.max_parallel} max)"
+            raise ValueError(msg)
+
     def submit(self, submit: TaskSubmit) -> str:
         """Create a task, spawn CLI subprocess. Returns task_id."""
         self._check_enabled()
 
         # Resolve chat_id: CLI subprocess doesn't know it, look up from agent name
-        if not submit.chat_id:
-            resolved = self._agent_chat_ids.get(submit.parent_agent, 0)
-            if resolved:
-                submit.chat_id = resolved
+        self._resolve_submit_chat_id(submit)
+        if submit.model_selection_origin is None:
+            submit.model_selection_origin = (
+                "user" if submit.model_override or submit.provider_override else "infrastructure"
+            )
 
         # #79: interactive tasks bypass the per-chat concurrency cap so
         # direct user follow-ups stay responsive under heavy batch load.
         # Active count excludes already-running interactive tasks for the
         # same reason — they never "fill up" the cap for background work.
         priority = normalise_priority(submit.priority)
-        if priority != "interactive":
-            active = sum(
-                1
-                for t in self._in_flight.values()
-                if t.entry.chat_id == submit.chat_id
-                and t.asyncio_task
-                and not t.asyncio_task.done()
-                and t.entry.priority != "interactive"
-            )
-            if active >= self._config.max_parallel:
-                msg = f"Too many background tasks ({self._config.max_parallel} max)"
-                raise ValueError(msg)
+        self._check_submit_capacity(submit)
 
         provider = submit.provider_override or ""
         model = submit.model_override or ""
@@ -268,6 +339,67 @@ class TaskHub:
             entry.provider,
         )
         return task_id
+
+    async def resume_routed(
+        self,
+        task_id: str,
+        follow_up: str,
+        *,
+        parent_agent: str = "",
+    ) -> str:
+        """Resume on the pinned provider/model with policy-selected effort."""
+        self._check_enabled()
+        async with self._routing_lock(("resume", task_id)):
+            entry = self._registry.get(task_id)
+            if entry is None:
+                msg = f"Task '{task_id}' not found"
+                raise ValueError(msg)
+            if entry.status not in _RESUMABLE:
+                msg = f"Task '{task_id}' is still {entry.status}"
+                raise ValueError(msg)
+            if not entry.session_id:
+                msg = f"Task '{task_id}' has no resumable session"
+                raise ValueError(msg)
+            if not entry.provider:
+                msg = f"Task '{task_id}' has no provider recorded"
+                raise ValueError(msg)
+            inflight = self._in_flight.get(task_id)
+            if inflight and inflight.asyncio_task and not inflight.asyncio_task.done():
+                msg = f"Task '{task_id}' is already running"
+                raise ValueError(msg)
+            agent_name = parent_agent or entry.parent_agent
+            handler = self._route_handlers.get(agent_name)
+            if handler is None:
+                msg = f"Task routing unavailable for agent '{agent_name}'"
+                raise ValueError(msg)
+            submit = TaskSubmit(
+                chat_id=entry.chat_id,
+                prompt=follow_up,
+                message_id=0,
+                thread_id=entry.thread_id,
+                parent_agent=entry.parent_agent,
+                user_id=entry.user_id,
+                transport=entry.transport,
+                model_selection_origin="infrastructure",
+            )
+            selected = await handler(
+                submit,
+                SelectedModelTarget(
+                    model=entry.model,
+                    provider=entry.provider,
+                    reasoning_effort=entry.thinking or None,
+                ),
+            )
+            if selected.model != entry.model or selected.provider != entry.provider:
+                msg = "Task resume routing cannot change the persisted provider/model"
+                raise ValueError(msg)
+            self._registry.update_status(
+                task_id,
+                entry.status,
+                thinking=selected.reasoning_effort or "",
+            )
+            entry.thinking = selected.reasoning_effort or ""
+            return self.resume(task_id, follow_up, parent_agent=parent_agent)
 
     def _spawn(
         self,
@@ -476,12 +608,12 @@ class TaskHub:
                 provider_override=entry.provider or None,
                 reasoning_effort_override=thinking or None,
                 model_selection_origin=(
-                    "infrastructure"
-                    if resume_session is not None or not (entry.model or entry.provider)
-                    else "user"
+                    "infrastructure" if resume_session is not None else entry.model_selection_origin
                 ),
                 chat_id=entry.chat_id,
                 topic_id=entry.thread_id,
+                user_id=entry.user_id,
+                transport=entry.transport,
                 process_label=f"task:{entry.task_id}",
                 timeout_seconds=timeout,
                 resume_session=resume_session,

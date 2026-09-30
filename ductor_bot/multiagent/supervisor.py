@@ -400,6 +400,7 @@ class AgentSupervisor:
 
         # Register this agent's CLI service and workspace paths for task execution
         hub.set_cli_service(name, orch.cli_service)
+        hub.set_route_handler(name, orch.route_task_submit)
         hub.set_agent_paths(name, stack.paths)
         # #92: register this agent's ProcessRegistry so TaskHub.cancel routes
         # kill_for_task to the registry where task:<id> subprocesses actually

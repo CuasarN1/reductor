@@ -34,6 +34,16 @@ def _normalise_transport(value: str) -> str:
     return _TRANSPORT_ALIASES.get(stripped, stripped)
 
 
+def _optional_int(value: object) -> int | None:
+    """Parse an optional numeric identity without accepting arbitrary objects."""
+    if value is None or isinstance(value, bool) or not isinstance(value, (int, str)):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 _DEFAULT_PORT = 8799
 _BIND_ALL_HOST = ".".join(["0"] * 4)
 
@@ -246,7 +256,8 @@ class InternalAgentAPI:
         """POST /tasks/create — create a background task.
 
         Expects JSON: ``{"from": "agent", "prompt": "...", "name": "...",
-        "provider": null, "model": null, "thinking": null}``
+        "provider": null, "model": null, "thinking": null,
+        "user_id": null, "transport": "tg"}``
         """
         if self._task_hub is None:
             return web.json_response(
@@ -283,10 +294,13 @@ class InternalAgentAPI:
             model_override=data.get("model") or "",
             thinking_override=data.get("thinking") or "",
             priority=normalise_priority(data.get("priority")),
+            user_id=_optional_int(data.get("user_id")),
+            transport=_normalise_transport(str(data.get("transport") or "tg")),
+            model_selection_origin="infrastructure",
         )
 
         try:
-            task_id = self._task_hub.submit(submit)
+            task_id = await self._task_hub.submit_routed(submit)
         except ValueError as exc:
             return web.json_response({"success": False, "error": str(exc)})
 
@@ -330,7 +344,11 @@ class InternalAgentAPI:
                 )
 
         try:
-            resumed_id = self._task_hub.resume(task_id, prompt, parent_agent=sender)
+            resumed_id = await self._task_hub.resume_routed(
+                task_id,
+                prompt,
+                parent_agent=sender,
+            )
         except ValueError as exc:
             return web.json_response({"success": False, "error": str(exc)})
 

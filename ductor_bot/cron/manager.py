@@ -50,6 +50,7 @@ class CronJob:
     chat_id: int = 0
     topic_id: int | None = None
     transport: str = "tg"
+    user_id: int | None = None
 
     # Mute delivery on the success path; errors are still delivered (#133)
     silent_on_success: bool = False
@@ -80,6 +81,7 @@ class CronJob:
             "chat_id": self.chat_id,
             "topic_id": self.topic_id,
             "transport": self.transport,
+            "user_id": self.user_id,
             "silent_on_success": self.silent_on_success,
         }
         if self.timezone:
@@ -110,6 +112,7 @@ class CronJob:
             chat_id=data.get("chat_id", 0),
             topic_id=data.get("topic_id"),
             transport=data.get("transport", "tg"),
+            user_id=data.get("user_id"),
             silent_on_success=data.get("silent_on_success", False),
         )
 

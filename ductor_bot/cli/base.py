@@ -87,6 +87,7 @@ class CLIConfig:
     process_registry: ProcessRegistry | None = None
     chat_id: int = 0
     topic_id: int | None = None
+    user_id: int | None = None
     process_label: str = "main"
     # Gemini-specific auth fallback:
     gemini_api_key: str | None = None
@@ -140,6 +141,8 @@ def _docker_env_flags(
     ]
     if config.topic_id:
         env_flags += ["-e", f"DUCTOR_TOPIC_ID={config.topic_id}"]
+    if config.user_id is not None:
+        env_flags += ["-e", f"DUCTOR_USER_ID={config.user_id}"]
     if task_id := task_id_from_label(config.process_label):
         env_flags += ["-e", f"DUCTOR_TASK_ID={task_id}"]
     if config.transcribe_command:

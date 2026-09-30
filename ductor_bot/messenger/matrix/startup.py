@@ -144,7 +144,7 @@ async def _handle_recovery(bot: MatrixBot) -> None:
         await bot.notification_service.notify(action.chat_id, note)
         if action.kind == "named_session" and action.session_name:
             with contextlib.suppress(Exception):
-                orch.submit_named_followup_bg(
+                await orch.submit_named_followup_bg(
                     action.chat_id,
                     action.session_name,
                     action.prompt_preview,

@@ -822,11 +822,30 @@ async def named_session_flow(  # noqa: PLR0911
         return OrchestratorResult(text=t("session.still_running", name=session_name))
 
     tag = f"**[{session_name} | {ns.provider}]**\n"
+    try:
+        selected = await orch.resolve_policy_execution_target(
+            key,
+            text,
+            selection_origin="infrastructure",
+            session_target=SelectedModelTarget(
+                model=ns.model,
+                provider=ns.provider,
+                reasoning_effort=ns.reasoning_effort or None,
+            ),
+        )
+    except ValueError as exc:
+        return OrchestratorResult(text=str(exc))
+    orch._named_sessions.update_reasoning_effort(
+        key.chat_id,
+        session_name,
+        selected.reasoning_effort or "",
+    )
     orch._named_sessions.mark_running(key.chat_id, session_name, text)
     request = AgentRequest(
         prompt=text,
         model_override=ns.model,
         provider_override=ns.provider,
+        reasoning_effort_override=selected.reasoning_effort,
         model_selection_origin="infrastructure",
         chat_id=key.chat_id,
         topic_id=key.topic_id,
@@ -859,7 +878,7 @@ async def named_session_flow(  # noqa: PLR0911
     return OrchestratorResult(text=f"{tag}{response.result}")
 
 
-async def named_session_streaming(  # noqa: PLR0911
+async def named_session_streaming(  # noqa: C901, PLR0911
     orch: Orchestrator,
     key: SessionKey,
     session_name: str,
@@ -878,11 +897,30 @@ async def named_session_streaming(  # noqa: PLR0911
 
     cb = cbs or StreamingCallbacks()
     tag = f"**[{session_name} | {ns.provider}]**\n"
+    try:
+        selected = await orch.resolve_policy_execution_target(
+            key,
+            text,
+            selection_origin="infrastructure",
+            session_target=SelectedModelTarget(
+                model=ns.model,
+                provider=ns.provider,
+                reasoning_effort=ns.reasoning_effort or None,
+            ),
+        )
+    except ValueError as exc:
+        return OrchestratorResult(text=str(exc))
+    orch._named_sessions.update_reasoning_effort(
+        key.chat_id,
+        session_name,
+        selected.reasoning_effort or "",
+    )
     orch._named_sessions.mark_running(key.chat_id, session_name, text)
     request = AgentRequest(
         prompt=text,
         model_override=ns.model,
         provider_override=ns.provider,
+        reasoning_effort_override=selected.reasoning_effort,
         model_selection_origin="infrastructure",
         chat_id=key.chat_id,
         topic_id=key.topic_id,

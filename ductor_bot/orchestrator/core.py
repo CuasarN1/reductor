@@ -97,11 +97,13 @@ if TYPE_CHECKING:
     from ductor_bot.background import BackgroundObserver
     from ductor_bot.bus.bus import MessageBus
     from ductor_bot.bus.lock_pool import LockPool
+    from ductor_bot.cli.param_resolver import TaskOverrides
     from ductor_bot.config import ModelRegistry
     from ductor_bot.multiagent.bus import AsyncInterAgentResult
     from ductor_bot.multiagent.supervisor import AgentSupervisor
     from ductor_bot.session.named import NamedSession
     from ductor_bot.tasks.hub import TaskHub
+    from ductor_bot.tasks.models import TaskSubmit
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +301,56 @@ class Orchestrator:
         self._task_hub = hub
         hub.start_maintenance()
 
+    async def route_task_submit(
+        self,
+        submit: TaskSubmit,
+        session_target: SelectedModelTarget | None,
+    ) -> SelectedModelTarget:
+        """Apply this agent's router and model policy to TaskHub work."""
+        return await self.resolve_policy_execution_target(
+            SessionKey(
+                chat_id=submit.chat_id,
+                topic_id=submit.thread_id,
+                user_id=submit.user_id,
+                transport=submit.transport,
+            ),
+            submit.prompt,
+            provider_override=submit.provider_override or None,
+            model_override=submit.model_override or None,
+            reasoning_effort_override=submit.thinking_override or None,
+            selection_origin=submit.model_selection_origin
+            or (
+                "user"
+                if submit.provider_override or submit.model_override or submit.thinking_override
+                else "infrastructure"
+            ),
+            session_target=session_target,
+        )
+
+    async def route_task_overrides(
+        self,
+        key: SessionKey,
+        prompt: str,
+        overrides: TaskOverrides,
+    ) -> TaskOverrides:
+        """Route cron/webhook execution while preserving their CLI parameters."""
+        from ductor_bot.cli.param_resolver import TaskOverrides
+
+        selected = await self.resolve_policy_execution_target(
+            key,
+            prompt,
+            provider_override=overrides.provider,
+            model_override=overrides.model,
+            reasoning_effort_override=overrides.reasoning_effort,
+            selection_origin="infrastructure",
+        )
+        return TaskOverrides(
+            provider=selected.provider,
+            model=selected.model,
+            reasoning_effort=selected.reasoning_effort,
+            cli_parameters=overrides.cli_parameters,
+        )
+
     def set_access_user_resolver(self, resolver: _AccessUserResolver | None) -> None:
         """Inject a transport-specific username -> user id resolver for /access."""
         self._access_user_resolver = resolver
@@ -399,6 +451,15 @@ class Orchestrator:
             )
 
         fallback = self._available_router_fallback(fallback, candidates)
+        if len(candidates) == 1 and len(candidates[0].reasoning_efforts) <= 1:
+            # There is no meaningful choice to classify. This is common for
+            # pinned non-Codex resumes and tightly constrained user policies.
+            only = candidates[0]
+            return fallback or SelectedModelTarget(
+                model=only.model,
+                provider=only.provider,
+                reasoning_effort=(only.reasoning_efforts[0] if only.reasoning_efforts else None),
+            )
         if not self._providers.is_available_model(router.provider, router.model):
             logger.warning(
                 "Model router target unavailable provider=%s model=%s; using fallback",
@@ -414,9 +475,130 @@ class Orchestrator:
             tuple(candidates),
             chat_id=key.chat_id,
             topic_id=key.topic_id,
+            user_id=key.user_id,
             transport=key.transport,
         )
         return selected or fallback
+
+    async def resolve_policy_execution_target(  # noqa: C901, PLR0913
+        self,
+        key: SessionKey,
+        prompt: str,
+        *,
+        provider_override: str | None = None,
+        model_override: str | None = None,
+        reasoning_effort_override: str | None = None,
+        selection_origin: ModelSelectionOrigin = "infrastructure",
+        session_target: SelectedModelTarget | None = None,
+    ) -> SelectedModelTarget:
+        """Resolve one execution target and enforce the caller's model policy.
+
+        Explicit infrastructure pins (cron configuration, persisted sessions,
+        or an agent's task-tool choice) skip classification but still pass the
+        model/reasoning allowlists.  Unpinned work is classified exactly once.
+        Resume callers provide ``session_target`` so provider/model context is
+        immutable while the router may choose a cheaper safe Codex effort.
+        """
+        user_id = subject_id_for_key(key)
+        has_explicit_target = bool(provider_override or model_override)
+        has_manual_override = bool(provider_override or model_override or reasoning_effort_override)
+        if (
+            selection_origin == "user"
+            and has_manual_override
+            and not can_switch_models(self._config, user_id)
+        ):
+            raise ValueError(model_switch_denied_text())
+
+        selected: SelectedModelTarget | None
+        if has_explicit_target:
+            if provider_override:
+                provider = provider_override
+                model = model_override or self.default_model_for_provider(provider)
+            else:
+                assert model_override is not None
+                model = model_override
+                provider = self.models.provider_for(model)
+            selected = SelectedModelTarget(
+                model=model,
+                provider=provider,
+                reasoning_effort=(
+                    reasoning_effort_override or self._config.reasoning_effort
+                    if provider == "codex"
+                    else None
+                ),
+            )
+            if provider == "codex" and reasoning_effort_override is None:
+                tuned = await self.select_execution_target(
+                    key,
+                    prompt,
+                    session_target=selected,
+                )
+                selected = tuned or selected
+        else:
+            selected = await self.select_execution_target(
+                key,
+                prompt,
+                session_target=session_target,
+            )
+            if selected is None:
+                selected = session_target
+            if selected is None:
+                model, provider = self.resolve_runtime_target(self._config.model)
+                selected = SelectedModelTarget(
+                    model=model,
+                    provider=provider,
+                    reasoning_effort=(
+                        self._config.reasoning_effort if provider == "codex" else None
+                    ),
+                )
+            if reasoning_effort_override and selected.provider == "codex":
+                selected = SelectedModelTarget(
+                    model=selected.model,
+                    provider=selected.provider,
+                    reasoning_effort=reasoning_effort_override,
+                )
+
+        if (
+            (session_target is not None or has_explicit_target)
+            and selected.provider == "codex"
+            and reasoning_effort_override is None
+        ):
+            inventory = next(
+                (
+                    item
+                    for item in self._providers.available_models()
+                    if item.provider == selected.provider and item.model == selected.model
+                ),
+                None,
+            )
+            supported = (
+                inventory.reasoning_efforts
+                if inventory is not None and inventory.reasoning_efforts
+                else ("low", "medium", "high", "xhigh")
+            )
+            allowed_efforts = filter_allowed_reasoning_efforts(
+                self._config,
+                user_id,
+                supported,
+            )
+            desired_effort = selected.reasoning_effort or self._config.reasoning_effort
+            if allowed_efforts and desired_effort not in allowed_efforts:
+                selected = SelectedModelTarget(
+                    model=selected.model,
+                    provider=selected.provider,
+                    reasoning_effort=allowed_efforts[0],
+                )
+
+        denial = request_policy_denial(
+            self._config,
+            user_id,
+            selected.model,
+            provider=selected.provider,
+            reasoning_effort=selected.reasoning_effort or self._config.reasoning_effort,
+        )
+        if denial:
+            raise ValueError(denial)
+        return selected
 
     def _available_router_fallback(
         self,
@@ -758,53 +940,32 @@ class Orchestrator:
             msg = "Background observer not initialized"
             raise RuntimeError(msg)
 
-        user_id = (
-            request.user_id if request.user_id is not None else (chat_id if chat_id > 0 else None)
-        )
         model_selection_origin: ModelSelectionOrigin = (
             "user" if request.provider_override or request.model_override else "infrastructure"
         )
-        selected = None
+        selected = await self.resolve_policy_execution_target(
+            SessionKey(
+                chat_id=chat_id,
+                topic_id=request.thread_id,
+                user_id=request.user_id,
+                transport="tg",
+            ),
+            prompt,
+            provider_override=request.provider_override,
+            model_override=request.model_override,
+            selection_origin=model_selection_origin,
+        )
         if not request.provider_override and not request.model_override:
-            selected = await self.select_execution_target(
-                SessionKey(
-                    chat_id=chat_id,
-                    topic_id=request.thread_id,
-                    user_id=request.user_id,
-                    transport="tg",
-                ),
-                prompt,
-            )
-        if selected is not None:
-            model_name = selected.model
-            provider_name = selected.provider
-            reasoning_effort = selected.reasoning_effort
             model_selection_origin = "policy"
-        else:
-            model_name, provider_name = self.resolve_runtime_target(self._config.model)
-            reasoning_effort = None
 
-        if request.provider_override or request.model_override:
-            if not can_switch_models(self._config, user_id):
-                raise ValueError(model_switch_denied_text())
-            if request.provider_override:
-                provider_name = request.provider_override
-                model_name = request.model_override or self.default_model_for_provider(
-                    request.provider_override
-                )
-            elif request.model_override:
-                model_name = request.model_override
-                provider_name = self.models.provider_for(request.model_override)
-        if denial := request_policy_denial(
-            self._config,
-            user_id,
-            model_name,
-            provider=provider_name,
-            reasoning_effort=reasoning_effort or self._config.reasoning_effort,
-        ):
-            raise ValueError(denial)
-
-        ns = self._named_sessions.create(chat_id, provider_name, model_name, prompt)
+        ns = self._named_sessions.create(
+            chat_id,
+            selected.provider,
+            selected.model,
+            prompt,
+            reasoning_effort=selected.reasoning_effort or "",
+            user_id=request.user_id,
+        )
         exec_config = resolve_cli_config(self._config, self._observers.codex_cache)
         sub = BackgroundSubmit(
             chat_id=chat_id,
@@ -812,16 +973,16 @@ class Orchestrator:
             message_id=request.message_id,
             thread_id=request.thread_id,
             user_id=request.user_id,
-            reasoning_effort_override=reasoning_effort or "",
+            reasoning_effort_override=selected.reasoning_effort or "",
             model_selection_origin=model_selection_origin,
             session_name=ns.name,
-            provider_override=provider_name,
-            model_override=model_name,
+            provider_override=selected.provider,
+            model_override=selected.model,
         )
         task_id = self._observers.background.submit(sub, exec_config)
         return task_id, ns.name
 
-    def submit_named_followup_bg(  # noqa: PLR0913
+    async def submit_named_followup_bg(  # noqa: PLR0913
         self,
         chat_id: int,
         session_name: str,
@@ -847,15 +1008,27 @@ class Orchestrator:
         if ns.status == "running":
             msg = f"Session '{session_name}' is still processing"
             raise ValueError(msg)
-        policy_user_id = user_id if user_id is not None else (chat_id if chat_id > 0 else None)
-        if denial := request_policy_denial(
-            self._config,
-            policy_user_id,
-            ns.model,
-            provider=ns.provider,
-            reasoning_effort=self._config.reasoning_effort,
-        ):
-            raise ValueError(denial)
+        effective_user_id = user_id if user_id is not None else ns.user_id
+        selected = await self.resolve_policy_execution_target(
+            SessionKey(
+                chat_id=chat_id,
+                topic_id=thread_id,
+                user_id=effective_user_id,
+                transport=ns.transport,
+            ),
+            prompt,
+            selection_origin="infrastructure",
+            session_target=SelectedModelTarget(
+                model=ns.model,
+                provider=ns.provider,
+                reasoning_effort=ns.reasoning_effort or None,
+            ),
+        )
+        self._named_sessions.update_reasoning_effort(
+            chat_id,
+            session_name,
+            selected.reasoning_effort or "",
+        )
 
         self._named_sessions.mark_running(chat_id, session_name, prompt)
         exec_config = resolve_cli_config(self._config, self._observers.codex_cache)
@@ -864,7 +1037,8 @@ class Orchestrator:
             prompt=prompt,
             message_id=message_id,
             thread_id=thread_id,
-            user_id=user_id,
+            user_id=effective_user_id,
+            reasoning_effort_override=selected.reasoning_effort or "",
             model_selection_origin="infrastructure",
             session_name=session_name,
             resume_session_id=ns.session_id,

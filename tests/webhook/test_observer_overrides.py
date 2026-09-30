@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -10,6 +10,7 @@ from ductor_bot.cli.codex_cache import CodexModelCache
 from ductor_bot.cli.codex_discovery import CodexModelInfo
 from ductor_bot.cli.param_resolver import TaskOverrides
 from ductor_bot.config import AgentConfig
+from ductor_bot.session import SessionKey
 from ductor_bot.webhook.models import WebhookEntry
 
 
@@ -137,3 +138,26 @@ def test_dispatch_with_cli_parameters(
     assert exec_config.model == "gpt-4o"
     assert exec_config.reasoning_effort == "high"
     assert exec_config.cli_parameters == ["--custom-param", "custom-value"]
+
+
+async def test_unpinned_webhook_uses_shared_execution_router(
+    base_config: AgentConfig,
+    codex_cache: CodexModelCache,
+) -> None:
+    from ductor_bot.webhook.observer import WebhookObserver
+
+    observer = WebhookObserver(
+        paths=MagicMock(),
+        manager=MagicMock(),
+        config=base_config,
+        codex_cache=codex_cache,
+    )
+    routed = TaskOverrides(provider="codex", model="gpt-4o", reasoning_effort="low")
+    callback = AsyncMock(return_value=routed)
+    observer.set_execution_router(callback)
+    key = SessionKey(chat_id=42, user_id=42)
+
+    result = await observer.route_execution_overrides(key, "payload", TaskOverrides())
+
+    assert result == routed
+    callback.assert_awaited_once_with(key, "payload", TaskOverrides())

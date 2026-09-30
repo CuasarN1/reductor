@@ -118,3 +118,22 @@ class TestRecoveredRunning:
         recovered = reg2.pop_recovered_running()
         assert len(recovered) == 1
         assert recovered[0].last_prompt == "my prompt"
+
+    def test_creator_identity_and_reasoning_round_trip(self, tmp_path: Path) -> None:
+        reg = _make_registry(tmp_path)
+        ns = reg.create(
+            chat_id=-100,
+            provider="codex",
+            model="gpt-6-sol",
+            prompt_preview="review",
+            reasoning_effort="high",
+            user_id=42,
+        )
+        reg.mark_running(-100, ns.name, "continue review")
+
+        reg2 = NamedSessionRegistry(tmp_path / "named_sessions.json")
+        recovered = reg2.pop_recovered_running()
+
+        assert len(recovered) == 1
+        assert recovered[0].user_id == 42
+        assert recovered[0].reasoning_effort == "high"

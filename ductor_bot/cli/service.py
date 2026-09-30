@@ -501,6 +501,7 @@ class CLIService:
                 process_registry=self._process_registry,
                 chat_id=request.chat_id,
                 topic_id=request.topic_id,
+                user_id=request.user_id,
                 transport=request.transport,
                 process_label=request.process_label,
                 cli_parameters=[] if router else self._config.cli_parameters_for_provider(provider),

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import secrets
 import sys
 from datetime import UTC, datetime
@@ -361,6 +362,9 @@ def main() -> None:
         "quiet_start": args.quiet_start,
         "quiet_end": args.quiet_end,
         "dependency": args.dependency.strip() if args.dependency else None,
+        "user_id": (
+            int(os.environ["DUCTOR_USER_ID"]) if os.environ.get("DUCTOR_USER_ID") else None
+        ),
     }
     data["hooks"].append(hook)
     save_hooks(HOOKS_PATH, data)

@@ -247,6 +247,109 @@ class TestHandleHealth:
         assert data["agents"]["sub1"]["restart_count"] == 1
 
 
+class TestHandleTaskCreate:
+    async def test_unpinned_create_routes_with_originating_identity(
+        self,
+        client: TestClient,
+        api: InternalAgentAPI,
+    ) -> None:
+        hub = MagicMock()
+        hub.submit_routed = AsyncMock(return_value="task-1")
+        api.set_task_hub(hub)
+
+        resp = await client.post(
+            "/tasks/create",
+            json={
+                "from": "main",
+                "prompt": "small task",
+                "chat_id": -100,
+                "topic_id": 7,
+                "user_id": 42,
+                "transport": "telegram",
+            },
+        )
+
+        assert resp.status == 200
+        assert await resp.json() == {"success": True, "task_id": "task-1"}
+        submit = hub.submit_routed.await_args.args[0]
+        assert submit.user_id == 42
+        assert submit.chat_id == -100
+        assert submit.thread_id == 7
+        assert submit.transport == "tg"
+        assert submit.model_selection_origin == "infrastructure"
+        assert submit.model_override == ""
+
+    async def test_explicit_override_remains_infrastructure_selection(
+        self,
+        client: TestClient,
+        api: InternalAgentAPI,
+    ) -> None:
+        hub = MagicMock()
+        hub.submit_routed = AsyncMock(return_value="task-2")
+        api.set_task_hub(hub)
+
+        resp = await client.post(
+            "/tasks/create",
+            json={
+                "from": "main",
+                "prompt": "review",
+                "user_id": 42,
+                "model": "gpt-6-sol",
+                "thinking": "medium",
+            },
+        )
+
+        assert resp.status == 200
+        submit = hub.submit_routed.await_args.args[0]
+        assert submit.model_override == "gpt-6-sol"
+        assert submit.thinking_override == "medium"
+        assert submit.model_selection_origin == "infrastructure"
+
+    async def test_disallowed_override_is_returned_without_creating_task(
+        self,
+        client: TestClient,
+        api: InternalAgentAPI,
+    ) -> None:
+        hub = MagicMock()
+        hub.submit_routed = AsyncMock(side_effect=ValueError("Model `opus` is not allowed"))
+        api.set_task_hub(hub)
+
+        resp = await client.post(
+            "/tasks/create",
+            json={"from": "main", "prompt": "work", "model": "opus", "user_id": 42},
+        )
+
+        assert resp.status == 200
+        assert await resp.json() == {
+            "success": False,
+            "error": "Model `opus` is not allowed",
+        }
+
+
+class TestHandleTaskResume:
+    async def test_resume_uses_policy_aware_path(
+        self,
+        client: TestClient,
+        api: InternalAgentAPI,
+    ) -> None:
+        hub = MagicMock()
+        hub.registry.get.return_value = MagicMock(parent_agent="main")
+        hub.resume_routed = AsyncMock(return_value="task-1")
+        api.set_task_hub(hub)
+
+        resp = await client.post(
+            "/tasks/resume",
+            json={"from": "main", "task_id": "task-1", "prompt": "continue"},
+        )
+
+        assert resp.status == 200
+        hub.resume_routed.assert_awaited_once_with(
+            "task-1",
+            "continue",
+            parent_agent="main",
+        )
+
+
 class TestHandleTaskCancel:
     async def test_cancel_logs_sender(
         self,

@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
+
+from ductor_bot.cli.types import ModelSelectionOrigin
 
 # #79: allowed priority levels for background tasks. The scheduler gives
 # ``interactive`` a concurrency-cap bypass so user-facing follow-ups stay
@@ -36,6 +38,9 @@ class TaskSubmit:
     model_override: str = ""
     thinking_override: str = ""
     priority: str = _DEFAULT_PRIORITY
+    user_id: int | None = None
+    transport: str = "tg"
+    model_selection_origin: ModelSelectionOrigin | None = None
 
 
 @dataclass(slots=True)
@@ -64,6 +69,9 @@ class TaskEntry:
     tasks_dir: str = ""  # Agent's tasks directory (for per-agent folder resolution)
     thread_id: int | None = None  # Forum topic ID (for routing results back to topic)
     priority: str = _DEFAULT_PRIORITY  # #79: interactive | background | batch
+    user_id: int | None = None
+    transport: str = "tg"
+    model_selection_origin: ModelSelectionOrigin = "user"
 
     def to_dict(self) -> dict[str, object]:
         d: dict[str, object] = {
@@ -92,6 +100,9 @@ class TaskEntry:
             "thinking": self.thinking,
             "tasks_dir": self.tasks_dir,
             "priority": self.priority,
+            "user_id": self.user_id,
+            "transport": self.transport,
+            "model_selection_origin": self.model_selection_origin,
         }
         if self.thread_id is not None:
             d["thread_id"] = self.thread_id
@@ -99,6 +110,9 @@ class TaskEntry:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TaskEntry:
+        origin = d.get("model_selection_origin", "user")
+        if origin not in {"user", "policy", "infrastructure"}:
+            origin = "user"
         return cls(
             task_id=d["task_id"],
             chat_id=d["chat_id"],
@@ -124,6 +138,9 @@ class TaskEntry:
             tasks_dir=d.get("tasks_dir", ""),
             thread_id=d.get("thread_id"),
             priority=normalise_priority(d.get("priority")),
+            user_id=d.get("user_id"),
+            transport=d.get("transport", "tg"),
+            model_selection_origin=cast("ModelSelectionOrigin", origin),
         )
 
 

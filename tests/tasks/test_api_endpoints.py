@@ -21,7 +21,8 @@ def _make_task_hub(
     cancel_returns: bool = True,
 ) -> MagicMock:
     hub = MagicMock()
-    hub.submit = MagicMock(return_value=submit_returns)
+    hub.submit_routed = AsyncMock(return_value=submit_returns)
+    hub.resume_routed = AsyncMock(return_value=submit_returns)
     hub.forward_question = AsyncMock(return_value=question_answer)
     hub.cancel = AsyncMock(return_value=cancel_returns)
 
