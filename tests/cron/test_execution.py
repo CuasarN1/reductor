@@ -224,6 +224,17 @@ class TestEnrichInstruction:
         result = enrich_instruction(original, "weekly")
         assert result.startswith(original)
 
+    def test_exact_task_output_protocol_overrides_confirmation_rules(self) -> None:
+        result = enrich_instruction("Read TASK_DESCRIPTION.md", "monitor")
+        assert (
+            "If TASK_DESCRIPTION.md defines an exact output protocol, follow it verbatim" in result
+        )
+        assert "including any required service ACK" in result
+        assert "This takes precedence over the general " in result
+        assert "user-facing-only and no-transport-confirmations rules below" in result
+        assert "Do not paraphrase, omit, or add text to the required output" in result
+        assert "Otherwise, do not include transport/debug/tool confirmations" in result
+
 
 class TestParseClaude:
     def test_parses_json(self) -> None:

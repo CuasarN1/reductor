@@ -45,8 +45,12 @@ def enrich_instruction(instruction: str, task_folder: str) -> str:
         f"- Read the {memory_file} file (it contains important information!)\n"
         f"- When finished, update {memory_file} with DATE + TIME and what you have done.\n"
         "- The final answer is delivered to Telegram automatically by ductor.\n"
-        "- Return only the user-facing result text.\n"
-        "- Do not include transport/debug/tool confirmations "
+        "- If TASK_DESCRIPTION.md defines an exact output protocol, follow it verbatim, "
+        "including any required service ACK. This takes precedence over the general "
+        "user-facing-only and no-transport-confirmations rules below. "
+        "Do not paraphrase, omit, or add text to the required output.\n"
+        "- Otherwise, return only the user-facing result text.\n"
+        "- Otherwise, do not include transport/debug/tool confirmations "
         '(for example: "Message sent successfully").'
     )
 
